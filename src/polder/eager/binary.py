@@ -4,10 +4,10 @@ import operator
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeAlias
 
-import narwhals as nw
-import narwhals.typing as nwt
 import numpy as np
 
+from polder.config import auto_align
+from polder.eager._narwhals_df_equals import narwhals_df_equals
 from polder.eager.align import align
 
 if TYPE_CHECKING:
@@ -36,35 +36,12 @@ __all__ = [
 ]
 
 
-def _narwhals_df_equals(l1: nwt.DataFrameT, l2: nwt.DataFrameT) -> bool:
-    """Determines equality of two DataFrames. Considers them equal if they have the same type,
-    columns and rows, with ordering for both being the same as well."""
-    # Two DataFrames are not equal if they have different types, different columns, or a different
-    # number of rows.
-    if type(l1) is not type(l2) or l1.columns != l2.columns or len(l1) != len(l2):
-        return False
-
-    # Otherwise, they are equal iff an outer join on all columns including row index creates no
-    # extra rows.
-    assert "__index" not in l1.columns
-    return len(l1) == (
-        l1.with_row_index("__index")
-        .lazy()
-        .join(
-            l2.with_row_index("__index").lazy(), on=[*l1.columns, "__index"], how="full"
-        )
-        .select(nw.col("__index").fill_null(-1).count())
-        .collect()
-        .item()
-    )
-
-
 def equals(a: SomeEagerFrameLabeledArray, b: SomeEagerFrameLabeledArray) -> bool:
     if type(a) is not type(b):
         return False
 
     return np.array_equal(a._values, b._values, equal_nan=True) and all(
-        _narwhals_df_equals(l1, l2) if l1 is not None and l2 is not None else l1 is l2
+        narwhals_df_equals(l1, l2) if l1 is not None and l2 is not None else l1 is l2
         for l1, l2 in zip(a._labels, b._labels, strict=True)
     )
 
@@ -100,7 +77,11 @@ def _generate_binop(op: Callable):
                 "Cannot perform binary array operation without any arrays."
             )
 
-        left_array, right_array = align(left_array, right_array)  # type: ignore[assignment]
+        # Use the auto_align setting to determine whether to perform alignment or just check it
+        should_align = auto_align()
+        left_array, right_array = align(
+            left_array, right_array, check_only=not should_align
+        )  # type: ignore[assignment]
         labels = tuple(
             l1 if l1 is not None else l2
             for l1, l2 in zip(left_array._labels, right_array._labels, strict=True)

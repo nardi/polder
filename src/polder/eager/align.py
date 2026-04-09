@@ -8,6 +8,7 @@ import numpy as np
 from immutabledict import immutabledict
 from narwhals.typing import DataFrameT
 
+from polder.eager._narwhals_df_equals import narwhals_df_equals
 from polder.protocols.array import AnyDataFrame
 
 if TYPE_CHECKING:
@@ -37,9 +38,7 @@ def _determine_alignment_cols(label_frame: nw.DataFrame[Any]) -> OrderedSet[str]
     )
 
 
-def _align_labels(
-    label_frames: Sequence[DataFrameT],
-) -> AlignmentResults[DataFrameT]:
+def _align_labels(label_frames: Sequence[DataFrameT]) -> AlignmentResults[DataFrameT]:
     # If there is only one frame, nothing to do.
     if len(label_frames) == 1:
         return AlignmentResults(label_frames[0], (slice(None),))
@@ -76,6 +75,44 @@ def _align_labels(
     return AlignmentResults(aligned_labels, value_indices)
 
 
+def _subset_labels(label_frames: Sequence[DataFrameT]) -> DataFrameT | None:
+    """Checks if frames are already aligned, and if so, subset the columns to the alignment
+    columns."""
+    # If there is only one frame, nothing to do.
+    if len(label_frames) == 1:
+        return label_frames[0]
+
+    # Determine alignment columns per label frame.
+    all_alignment_cols = frozenset(map(_determine_alignment_cols, label_frames))
+
+    if len(all_alignment_cols) > 1:
+        raise Exception(
+            f"Cannot align labels, because there are unmatched columns between them: {all_alignment_cols}"
+        )
+
+    (alignment_cols,) = all_alignment_cols
+    alignment_cols = list(alignment_cols)
+
+    if alignment_cols == []:
+        # No alignment columns, so remove the labels.
+        return None
+
+    # Check that all frames are equal after subsetting.
+    aligned_labels = label_frames[0].select(alignment_cols)
+    unaligned_frames: list[DataFrameT] = []
+    for frame in label_frames[1:]:
+        subset_frame = frame.select(alignment_cols)
+        if not narwhals_df_equals(aligned_labels, subset_frame):
+            unaligned_frames.append(subset_frame)
+    if unaligned_frames:
+        raise Exception(
+            "Cannot combine arrays with unaligned labels:\n"
+            + "\n".join(str(frame) for frame in [aligned_labels, *unaligned_frames])
+        )
+
+    return aligned_labels
+
+
 AxisNumbers: TypeAlias = tuple[int, ...]
 """A set of axes to align over the provided arrays."""
 
@@ -84,6 +121,7 @@ def align(
     *arrays: SomeEagerFrameLabeledArray,
     axes: Iterable[AxisNumbers] | None = None,
     drop_single_valued_labels: bool = True,
+    check_only: bool = False,
 ) -> tuple[SomeEagerFrameLabeledArray, ...]:
     """Aligns a number of frame-labeled arrays along all axes. The alignment rules are as follows:
 
@@ -105,6 +143,8 @@ def align(
         axes: Optional specification of axes to align. If None, aligns all axes.
         drop_single_valued_labels: If True, removes labels for axes that have only one row
             (since these will be broadcasted anyway). Defaults to True.
+        check_only: If True, only check if the arrays are aligned, and if so return them. Will not
+        modify anything.
     """
 
     # Extract labels and values for all arrays.
@@ -159,19 +199,27 @@ def align(
                 alignable_label_frame_positions.append((array_idx, axis_idx))
 
         if alignable_label_frames:
-            # Align the label frames and get reindexing information.
-            aligned_labels_for_axis, value_indices = _align_labels(
-                tuple(alignable_label_frames)
-            )
+            if check_only:
+                # Check that the label frames are aligned, and possibly subset the columns.
+                aligned_labels_for_axis = _subset_labels(tuple(alignable_label_frames))
 
-            # Replace the original labels with the aligned ones and reindex the arrays.
-            for (array_idx, axis_idx), value_idx in zip(
-                alignable_label_frame_positions, value_indices, strict=True
-            ):
-                all_labels[array_idx][axis_idx] = aligned_labels_for_axis
-                all_values[array_idx] = all_values[array_idx][
-                    (slice(None),) * axis_idx + (value_idx,)
-                ]
+                # Replace the original labels with the subsetted ones.
+                for array_idx, axis_idx in alignable_label_frame_positions:
+                    all_labels[array_idx][axis_idx] = aligned_labels_for_axis
+            else:
+                # Align the label frames and get reindexing information.
+                aligned_labels_for_axis, value_indices = _align_labels(
+                    tuple(alignable_label_frames)
+                )
+
+                # Replace the original labels with the aligned ones and reindex the arrays.
+                for (array_idx, axis_idx), value_idx in zip(
+                    alignable_label_frame_positions, value_indices, strict=True
+                ):
+                    all_labels[array_idx][axis_idx] = aligned_labels_for_axis
+                    all_values[array_idx] = all_values[array_idx][
+                        (slice(None),) * axis_idx + (value_idx,)
+                    ]
 
     return tuple(
         type(original_array)(tuple(array_labels), array_values)
