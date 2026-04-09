@@ -111,6 +111,28 @@ def _generate_binop(op: Callable):
     return _perform_binop
 
 
+def matmul(
+    left: SomeEagerFrameLabeledArray,
+    right: SomeEagerFrameLabeledArray,
+) -> SomeEagerFrameLabeledArray:
+    """Matrix multiplication of two labeled arrays.
+
+    Performs matrix multiplication on the values and handles labels appropriately.
+    For 2D arrays: (m, n) @ (n, p) -> (m, p)
+    The result has the labels from left's first axis and right's second axis.
+    """
+    # Align the arrays.
+    left, right = align(left, right, axes=((-1, 0),))
+
+    # Perform matrix multiplication on values.
+    result_values = left._values @ right._values
+
+    # Construct result labels: all but last from left, all but first from right.
+    result_labels = tuple(list(left._labels[:-1]) + list(right._labels[1:]))
+
+    return type(left)(result_labels, result_values)
+
+
 # Arithmetic operators
 add = _generate_binop(operator.add)
 sub = _generate_binop(operator.sub)

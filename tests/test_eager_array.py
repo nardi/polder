@@ -461,3 +461,27 @@ def test_mixed_array_and_scalar_operations():
     result = (array1 + 5.0) * array2 - 2.0
     expected = (array1.values() + 5.0) * array2.values() - 2.0
     np.testing.assert_array_almost_equal(result.values(), expected)
+
+
+def test_matmul_2d_arrays():
+    """Test matrix multiplication of two 2D arrays."""
+    values1 = np.random.randn(2, 3)
+    values2 = np.random.randn(3, 4)
+
+    labels1 = [pl.DataFrame({"i": np.arange(2)}), pl.DataFrame({"j": np.arange(3)})]
+    labels2 = [pl.DataFrame({"j": np.arange(3)}), pl.DataFrame({"k": np.arange(4)})]
+
+    array1 = pld.from_values_and_labels(values1, labels1)
+    array2 = pld.from_values_and_labels(values2, labels2)
+
+    result = array1 @ array2
+    expected = values1 @ values2
+
+    assert result.shape() == (2, 4)
+    np.testing.assert_array_almost_equal(result.values(), expected)
+
+    # Make sure that shuffling the labels makes no difference.
+    result2 = shuffle_labels(array1) @ shuffle_labels(array2)
+    assert result2.shape() == (2, 4)
+    _, result2 = align(result, result2)
+    np.testing.assert_array_almost_equal(result2.values(), result.values())

@@ -111,6 +111,9 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
     __pow__ = binary.pow
     __rpow__ = swap_args(binary.pow)
 
+    # Matrix multiplication
+    __matmul__ = binary.matmul
+
     # Bitwise operators
     __and__ = binary.and_
     __rand__ = binary.and_
