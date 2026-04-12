@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from typing import Self, TypeVar, overload
+from typing import TypeVar, overload
 
 import numpy as np
 from narwhals import Expr
 from optype.numpy import Array
 
 import polder.eager.binary as binary
+from polder.eager.pivot import pivot
 from polder.protocols.array import (
     AnyDataFrame,
     AxisIndices,
@@ -92,8 +93,8 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
 
         return EagerFrameLabeledArray(tuple(labels), values)
 
-    def equals(self, other: Self) -> bool:
-        return binary.equals(self, other)
+    equals = binary.equals
+    pivot = pivot
 
     # Arithmetic operators
     __add__ = binary.add
