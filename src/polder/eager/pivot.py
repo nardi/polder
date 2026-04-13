@@ -19,6 +19,7 @@ Labels = Sequence[nwt.DataFrameT | None]
 
 def pivot(
     arr: SomeEagerFrameLabeledArray,
+    /,
     *,
     axis_labels_to_pivot: Mapping[int, AxisLabelsToPivot],
     fill_value: Any = _NO_FILL,

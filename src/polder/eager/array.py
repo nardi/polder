@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TypeVar, overload
+from typing import Self, TypeVar, overload
 
 import numpy as np
 from narwhals import Expr
@@ -52,7 +52,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
     def shape(self) -> tuple[int, ...]:
         return self._values.shape
 
-    def __getitem__(self, indices: AxisIndices | tuple[AxisIndices, ...]):
+    def __getitem__(self, indices: AxisIndices | tuple[AxisIndices, ...]) -> Self:
         if not isinstance(indices, tuple):
             indices = (indices,)
         assert len(indices) <= len(self._labels)
@@ -91,7 +91,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
 
             values = values[(slice(None),) * i + (value_idx,)]
 
-        return EagerFrameLabeledArray(tuple(labels), values)
+        return type(self)(tuple(labels), values)
 
     equals = binary.equals
     pivot = pivot

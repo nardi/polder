@@ -46,13 +46,14 @@ def equals(a: SomeEagerFrameLabeledArray, b: SomeEagerFrameLabeledArray) -> bool
     )
 
 
-Scalar: TypeAlias = int | float | complex | np.generic
+Scalar: TypeAlias = int | float | complex | bool | np.generic
 
 
 def _generate_binop(op: Callable):
     def _perform_binop(
         left: SomeEagerFrameLabeledArray | Scalar,
         right: SomeEagerFrameLabeledArray | Scalar,
+        /,
     ) -> SomeEagerFrameLabeledArray:
         from polder.eager.array import EagerFrameLabeledArray
 
