@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import itertools
+import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
 import narwhals as nw
 import narwhals.typing as nwt
 import numpy as np
+
+from polder.protocols.array import AnyDataFrame
 
 if TYPE_CHECKING:
     from polder.eager.array import SomeEagerFrameLabeledArray
@@ -14,6 +18,7 @@ _NO_FILL = object()
 
 AxisLabelsSpecifier: TypeAlias = Sequence[str]
 AxisLabelsToPivot: TypeAlias = AxisLabelsSpecifier | Sequence[AxisLabelsSpecifier]
+AxesSlice = tuple[int, int]
 Labels = Sequence[nwt.DataFrameT | None]
 
 
@@ -33,14 +38,14 @@ def pivot(
     is labeled by `t`. To do so, we can use `pivot`:
 
     ```python
-    arr2 = pivot(arr, axis_labels_to_pivot={i: ["t"]})
+    arr2 = arr.pivot(axis_labels_to_pivot={i: ["t"]})
     ```
 
     This will create a new axis in `arr2` at location `i + 1`, which is labeled by `t`. If you want
     to separate an axis into more than two axes, this is also supported:
 
     ```python
-    arr2 = pivot(arr, axis_labels_to_pivot={i: [["y"], ["t"]]})
+    arr2 = arr.pivot(axis_labels_to_pivot={i: [["y"], ["t"]]})
     ```
 
     You can also split multiple label columns into a new axis together. Any label columns not
@@ -171,3 +176,74 @@ def _pivot_single_group(
     new_labels = [*labels[:axis], keep_labels, pivot_labels, *labels[axis + 1 :]]
 
     return new_values, new_labels
+
+
+def unpivot(
+    arr: SomeEagerFrameLabeledArray,
+    /,
+    *,
+    axes_to_merge: Sequence[AxesSlice],
+) -> SomeEagerFrameLabeledArray:
+    """Merge multiple consecutive axes into one.
+
+    The reverse of the `pivot` operation, as that splits a single axis into
+    multiple by separating them along the label columns. `unpivot` can recombine
+    these axes into a single one, taking the product of all labels.
+
+    Axes are specified as inclusive "psuedo-slices" in `axes_to_merge`. For
+    example the following will merge axes 1, 2, and 3 into a single axis, as
+    well as 5 and 6:
+
+    ```python
+    arr2 = arr.unpivot(axes_to_merge=[(1, 3), (5, 6)])
+    ```
+
+    The slices must have no overlap, i.e. `(1, 3)` and `(2, 4)` are not allowed
+    together. Also, to avoid mistakes they must be provided in order.
+    """
+    # Validate `axes_to_merge`.
+    flat_axes_to_merge = itertools.chain(*axes_to_merge)
+    if not all(a1 < a2 for a1, a2 in itertools.pairwise(flat_axes_to_merge)):
+        raise ValueError(
+            f"Axis slices are invalid, either unordered, single-valued, or not disjoint: {axes_to_merge}"
+        )
+
+    # Extract shape and labels.
+    shape = arr.shape()
+    labels = arr.labels()
+
+    for first_axis, last_axis in reversed(axes_to_merge):
+        axes_labels = labels[first_axis : last_axis + 1]
+        unlabeled_count = sum(1 for axis_labels in axes_labels if axis_labels is None)
+        if unlabeled_count:
+            if unlabeled_count != len(axes_labels):
+                raise ValueError("Cannot merge unlabeled axes with labeled ones.")
+
+            # All axes are unlabeled, so we can simply merge them together into
+            # one unlabeled axis.
+            merged_axis_labels = None
+        else:
+            axes_labels = cast(list[AnyDataFrame], axes_labels)
+
+            # Create the merged labels as a cross product of the axes. Add row
+            # numbers to ensure the result has the correct (row-major) order.
+            row_index_columns = tuple(f"__index{i}" for i in range(len(axes_labels)))
+            merged_axis_labels = (
+                axes_labels[0].with_row_index(row_index_columns[0]).lazy()
+            )
+            for i, axis_labels in enumerate(axes_labels[1:]):
+                merged_axis_labels = merged_axis_labels.join(
+                    axis_labels.with_row_index(row_index_columns[i + 1]).lazy(), how="cross"
+                )
+            merged_axis_labels = merged_axis_labels.sort(row_index_columns).drop(row_index_columns).collect()
+
+        # Replace the existing labels by the merged ones.
+        labels = (*labels[:first_axis], merged_axis_labels, *labels[last_axis+1:])
+        # Replace the corresponding shape entries by their product.
+        shape = (*shape[:first_axis], math.prod(shape[first_axis:last_axis+1]), *shape[last_axis+1:])
+
+    # Extract and reshape the values.
+    values = arr.values().reshape(shape)
+
+    return type(arr)(labels, values)
+

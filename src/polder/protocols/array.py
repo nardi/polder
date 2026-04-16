@@ -21,6 +21,7 @@ Scalar: TypeAlias = int | float | complex | bool
 
 AxisLabelsSpecifier: TypeAlias = Sequence[str]
 AxisLabelsToPivot: TypeAlias = AxisLabelsSpecifier | Sequence[AxisLabelsSpecifier]
+AxesSlice = tuple[int, int]
 
 
 class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
@@ -52,6 +53,13 @@ class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
         *,
         axis_labels_to_pivot: Mapping[int, AxisLabelsToPivot],
         fill_value: Any = ...,
+    ) -> Self: ...
+
+    def unpivot(
+        self,
+        /,
+        *,
+        axes_to_merge: Sequence[AxesSlice],
     ) -> Self: ...
 
     # Arithmetic operators
