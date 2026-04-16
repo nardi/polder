@@ -16,14 +16,14 @@ def test_equals_identical_arrays():
     """Test that identical arrays are equal."""
     array1 = generate_random_array()
     array2 = generate_random_array()
-    assert pld.equals(array1, array2)
+    assert array1.equals(array2)
 
 
 def test_not_equals_different_values():
     """Test that arrays with different values are not equal."""
     array = generate_random_array()
     array2 = array + 1.0
-    assert not pld.equals(array, array2)
+    assert not array.equals(array2)
 
 
 def test_equals_after_shuffle():
@@ -31,10 +31,10 @@ def test_equals_after_shuffle():
     array = generate_random_array()
     shuffled = shuffle_labels(array, axes=[0])
     # Before alignment they're different
-    assert not pld.equals(array, shuffled)
+    assert not array.equals(shuffled)
     # After alignment they're the same
     aligned1, aligned2 = align(array, shuffled)
-    assert pld.equals(aligned1, aligned2)
+    assert aligned1.equals(aligned2)
 
 
 # ============================================================================
