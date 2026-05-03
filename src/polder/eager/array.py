@@ -6,6 +6,7 @@ from narwhals import Expr
 from optype.numpy import Array
 
 import polder.eager.binary as binary
+import polder.eager.unary as unary
 from polder.eager.pivot import pivot, unpivot
 from polder.protocols.array import (
     AnyDataFrame,
@@ -98,6 +99,9 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
     unpivot = unpivot
 
     # Arithmetic operators
+    __abs__ = unary.abs_
+    __pos__ = unary.pos
+    __neg__ = unary.neg
     __add__ = binary.add
     __radd__ = binary.add
     __sub__ = binary.sub
@@ -117,6 +121,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
     __matmul__ = binary.matmul
 
     # Bitwise operators
+    __invert__ = unary.invert
     __and__ = binary.and_
     __rand__ = binary.and_
     __or__ = binary.or_
