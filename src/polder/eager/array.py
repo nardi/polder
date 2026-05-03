@@ -10,6 +10,7 @@ import polder.eager.unary as unary
 from polder.eager.pivot import pivot, unpivot
 from polder.protocols.array import (
     AnyDataFrame,
+    ArrayAxisIndices,
     AxisIndices,
     FrameLabeledArray,
     LabelFrameType,
@@ -47,8 +48,8 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
             axis = slice(None)
         return self._labels[axis]
 
-    def values(self) -> np.ndarray:
-        return self._values
+    def values(self, *indices: ArrayAxisIndices) -> np.ndarray:
+        return self._values[indices or ...]
 
     def shape(self) -> tuple[int, ...]:
         return self._values.shape

@@ -15,7 +15,8 @@ LabelFrameType = TypeVar("LabelFrameType", bound=AnyDataFrame, covariant=True)
 ValueArrayType = TypeVar("ValueArrayType", bound=AnyArray, covariant=True)
 
 
-AxisIndices: TypeAlias = int | slice | list[int] | Array1D | Expr
+ArrayAxisIndices: TypeAlias = int | slice | list[int] | Array1D
+AxisIndices: TypeAlias = ArrayAxisIndices | Expr
 
 Scalar: TypeAlias = int | float | complex | bool
 
@@ -25,15 +26,19 @@ AxesSlice = tuple[int, int]
 
 
 class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
-    def values(self) -> ValueArrayType:
-        """The value array that is being labeled. Can be any type that supports the Array API."""
+    def values(self, *indices: ArrayAxisIndices) -> ValueArrayType:
+        """The value array that is being labeled. Can be any type that supports
+        the Array API. Allows Numpy-style indexing to return a part of the
+        array, which may be more efficient."""
         ...
 
     def labels(
         self, axis: int | slice | None = None
     ) -> LabelFrameType | None | Sequence[LabelFrameType | None]:
-        """The labels for the value array. There is one frame per axis of the array, so `len(labels)
-        == len(values.shape)`. If an axis has size 1, it may be unlabeled, represented by `None`."""
+        """The labels for the value array. There is one frame per axis of the
+        array, so `len(labels) == len(values.shape)`. If an axis has size 1, it
+        may be unlabeled, represented by `None`. Allows returning labels for
+        only a part of the axes, which may be more efficient."""
         ...
 
     def shape(self) -> Sequence[int]:
@@ -41,8 +46,8 @@ class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
         ...
 
     def __getitem__(self, indices: AxisIndices | tuple[AxisIndices, ...]) -> Self:
-        """Index the array, either using numerical indices, or using Narwhals expressions which will
-        be used to filter the labels."""
+        """Index the array, either using numerical indices, or using Narwhals
+        expressions which will be used to filter the labels."""
         ...
 
     def equals(self, other: Self, /) -> bool: ...

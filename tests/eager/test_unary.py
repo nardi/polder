@@ -186,7 +186,7 @@ def test_unary_with_nan():
     result = -arr
 
     # NaN should remain NaN.
-    assert np.isnan(result.values()[0, 0])
-    assert result.values()[0, 1] == -1.0
-    assert result.values()[1, 0] == -2.0
-    assert np.isnan(result.values()[1, 1])
+    assert np.isnan(result.values(0, 0))
+    assert result.values(0, 1) == -1.0
+    assert result.values(1, 0) == -2.0
+    assert np.isnan(result.values(1, 1))
