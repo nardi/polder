@@ -62,7 +62,7 @@ def pivot(
     information will be lost in any case.
     """
     values = arr.values()
-    labels = tuple(arr.labels())
+    labels = arr.labels()
     xp = arr.array_namespace
 
     # Pivot each axis one at a time, processing in descending order so earlier pivots do not affect
@@ -73,7 +73,7 @@ def pivot(
             xp, values, labels, axis, pivot_spec, fill_value
         )
 
-    return type(arr)(tuple(labels), values)
+    return arr.create(labels, values)
 
 
 def _pivot_single_axis(
@@ -265,4 +265,4 @@ def unpivot(
     # Extract and reshape the values.
     values = arr.array_namespace.reshape(arr.values(), shape)
 
-    return type(arr)(labels, values)
+    return arr.create(labels, values)

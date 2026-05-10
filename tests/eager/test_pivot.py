@@ -1,3 +1,5 @@
+import jax
+import jax.numpy as jnp
 import numpy as np
 import polars as pl
 import pytest
@@ -303,3 +305,35 @@ def test_unpivot_three_axes_merge(value_array_type):
     # Values should be reshaped.
     expected_values = values.reshape(8, 3)
     np.testing.assert_array_equal(arr_unpivoted.values(), expected_values)
+
+
+def test_pivot_with_jax_jit():
+    values = jnp.arange(8 * 3).reshape(8, 3).astype(float)
+    labels = [
+        pl.DataFrame(
+            {
+                "x": [0, 0, 0, 0, 1, 1, 1, 1],
+                "y": [0, 0, 1, 1, 0, 0, 1, 1],
+                "t": [0, 1, 0, 1, 0, 1, 0, 1],
+            }
+        ),
+        pl.DataFrame({"extra": [0, 1, 2]}),
+    ]
+    arr = pld.from_values_and_labels(values, labels)
+
+    trace_count = 0
+
+    @jax.jit
+    def pivot(arr):
+        nonlocal trace_count
+        trace_count += 1
+        return arr.pivot(axis_labels_to_pivot={0: ["t"]})
+
+    pivot(arr)
+    pivot(arr + 1)
+    pivot(arr[:])
+    assert trace_count == 1
+
+    pivot(arr[::-1])
+    pivot(arr[::-1] * 2)
+    assert trace_count == 2

@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Self, TypeVar, cast, overload
 
@@ -7,6 +8,7 @@ from narwhals import Expr
 
 import polder.eager.binary as binary
 import polder.eager.unary as unary
+from polder.eager.labels import Labels
 from polder.eager.pivot import pivot, unpivot
 from polder.eager.value_array import AnyValueArray, SomeValueArray, ValueArrayNamespace
 from polder.protocols.array import (
@@ -22,12 +24,20 @@ def swap_args(f):
     return lambda a, b: f(b, a)
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
-    _labels: tuple[LabelFrameType | None, ...]
+    _labels: Labels[LabelFrameType]
     _values: SomeValueArray
 
+    @classmethod
+    def create(
+        cls, labels: Sequence[LabelFrameType | None], values: SomeValueArray
+    ) -> Self:
+        return cls(Labels(labels), values)
+
     def __post_init__(self):
+        # Check that we have the correct label container.
+        assert isinstance(self._labels, Labels)
         # Check that the value array's shape is determined.
         assert all(isinstance(n, int) for n in self._values.shape)
         # Check that the labels and values have the same shape.
@@ -103,7 +113,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
 
             values = values[(slice(None),) * i + (value_idx,)]
 
-        return type(self)(tuple(labels), values)
+        return self.create(labels, values)
 
     equals = binary.equals
     pivot = pivot
@@ -152,6 +162,17 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
     # Apparently __eq__ is supposed to return boolean, does Numpy break this rule too?
     __eq__ = binary.eq  # type: ignore
     __ne__ = binary.ne  # type: ignore
+
+
+# If JAX is installed, register as pytree.
+try:
+    from jax.tree_util import register_dataclass
+
+    register_dataclass(
+        EagerFrameLabeledArray, data_fields=["_values"], meta_fields=["_labels"]
+    )
+except ImportError:
+    pass
 
 
 SomeEagerFrameLabeledArray = TypeVar(

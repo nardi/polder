@@ -46,8 +46,8 @@ def from_values_and_labels(
     label_dfs = tuple(map(nw.from_native, labels))
     if isinstance(values, np.ndarray):
         # np.ndarray doesn't type as Array for some reason.
-        return EagerFrameLabeledArray(label_dfs, values)  # type: ignore
+        return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
     if maybe_jax is not None and isinstance(values, maybe_jax.Array):
         # jax.Array also doesn't type as Array.
-        return EagerFrameLabeledArray(label_dfs, values)  # type: ignore
+        return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
     raise NotImplementedError()

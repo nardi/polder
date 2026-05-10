@@ -232,7 +232,7 @@ def align(
                     ]
 
     return tuple(
-        type(original_array)(tuple(array_labels), array_values)
+        original_array.create(array_labels, array_values)
         for original_array, array_labels, array_values in zip(
             arrays, all_labels, all_values, strict=True
         )
