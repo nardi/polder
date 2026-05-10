@@ -233,17 +233,25 @@ def unpivot(
             )
             for i, axis_labels in enumerate(axes_labels[1:]):
                 merged_axis_labels = merged_axis_labels.join(
-                    axis_labels.with_row_index(row_index_columns[i + 1]).lazy(), how="cross"
+                    axis_labels.with_row_index(row_index_columns[i + 1]).lazy(),
+                    how="cross",
                 )
-            merged_axis_labels = merged_axis_labels.sort(row_index_columns).drop(row_index_columns).collect()
+            merged_axis_labels = (
+                merged_axis_labels.sort(row_index_columns)
+                .drop(row_index_columns)
+                .collect()
+            )
 
         # Replace the existing labels by the merged ones.
-        labels = (*labels[:first_axis], merged_axis_labels, *labels[last_axis+1:])
+        labels = (*labels[:first_axis], merged_axis_labels, *labels[last_axis + 1 :])
         # Replace the corresponding shape entries by their product.
-        shape = (*shape[:first_axis], math.prod(shape[first_axis:last_axis+1]), *shape[last_axis+1:])
+        shape = (
+            *shape[:first_axis],
+            math.prod(shape[first_axis : last_axis + 1]),
+            *shape[last_axis + 1 :],
+        )
 
     # Extract and reshape the values.
     values = arr.values().reshape(shape)
 
     return type(arr)(labels, values)
-

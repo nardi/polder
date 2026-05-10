@@ -186,16 +186,16 @@ def test_unpivot_multiple_axes():
 
     # Unpivot (0, 1) to merge (x, y) with (t).
     arr_unpivoted_1 = arr.unpivot(axes_to_merge=[(0, 1)])
-    
+
     # Should have shape (8, 2, 2): 4*2=8 from merging (x,y) with (t), then (s) and (extra).
     assert arr_unpivoted_1.shape() == (8, 2, 2)
-    
+
     # Then unpivot (1, 2) to merge (s) with (extra).
     arr_unpivoted_2 = arr_unpivoted_1.unpivot(axes_to_merge=[(1, 2)])
-    
+
     # Should have shape (8, 4): keeping the 8 from first merge, 2*2=4 from second.
     assert arr_unpivoted_2.shape() == (8, 4)
-    
+
     # Values should match the original (reshaped).
     np.testing.assert_array_equal(arr.values().reshape(8, 4), arr_unpivoted_2.values())
 

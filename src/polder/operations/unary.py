@@ -1,6 +1,5 @@
 """Dispatching layer for unary operations based on array type."""
 
-
 import polder.eager.unary as eager
 from polder.eager.array import EagerFrameLabeledArray
 from polder.protocols.array import SomeFrameLabeledArray
@@ -55,7 +54,6 @@ def _dispatch_unop(eager_op):
         raise NotImplementedError(f"Unary operation not implemented for {type(arr)}")
 
     return _dispatcher
-
 
 
 # Create dispatchers for all unary operations.

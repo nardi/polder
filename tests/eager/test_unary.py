@@ -100,7 +100,7 @@ def test_invert_bool():
 
 def test_neg_complex():
     """Test negation with complex numbers."""
-    values = np.array([[1+2j, 3-4j], [-5+0j, 0-6j]])
+    values = np.array([[1 + 2j, 3 - 4j], [-5 + 0j, 0 - 6j]])
     labels = [
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
@@ -119,7 +119,7 @@ def test_neg_complex():
 
 def test_abs_complex():
     """Test absolute value with complex numbers."""
-    values = np.array([[3+4j, 1+1j], [0+2j, 1+0j]])
+    values = np.array([[3 + 4j, 1 + 1j], [0 + 2j, 1 + 0j]])
     labels = [
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
