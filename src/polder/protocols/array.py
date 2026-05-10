@@ -1,13 +1,12 @@
 from collections.abc import Mapping, Sequence
-from typing import Any, Generic, Protocol, Self, TypeAlias, TypeVar
+from typing import Any, Generic, Protocol, Self, TypeAlias, TypeVar, overload
 
 from narwhals import DataFrame, Expr
-from optype.numpy import Array1D, CanArray
 
 AnyDataFrame: TypeAlias = DataFrame[Any]
 
 
-class AnyArray(CanArray, Protocol):
+class AnyArray(Protocol):
     """A protocol that value array types have to satisfy.."""
 
 
@@ -15,7 +14,7 @@ LabelFrameType = TypeVar("LabelFrameType", bound=AnyDataFrame, covariant=True)
 ValueArrayType = TypeVar("ValueArrayType", bound=AnyArray, covariant=True)
 
 
-ArrayAxisIndices: TypeAlias = int | slice | list[int] | Array1D
+ArrayAxisIndices: TypeAlias = int | slice | ValueArrayType
 AxisIndices: TypeAlias = ArrayAxisIndices | Expr
 
 Scalar: TypeAlias = int | float | complex | bool
@@ -31,6 +30,12 @@ class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
         the Array API. Allows Numpy-style indexing to return a part of the
         array, which may be more efficient."""
         ...
+
+    @overload
+    def labels(self, axis: int) -> LabelFrameType | None: ...
+
+    @overload
+    def labels(self, axis: slice | None = ...) -> Sequence[LabelFrameType | None]: ...
 
     def labels(
         self, axis: int | slice | None = None

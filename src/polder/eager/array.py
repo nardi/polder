@@ -1,13 +1,14 @@
-from dataclasses import dataclass
-from typing import Self, TypeVar, overload
+from dataclasses import dataclass, field
+from functools import cached_property
+from typing import Self, TypeVar, cast, overload
 
-import numpy as np
+from array_api_compat import array_namespace
 from narwhals import Expr
-from optype.numpy import Array
 
 import polder.eager.binary as binary
 import polder.eager.unary as unary
 from polder.eager.pivot import pivot, unpivot
+from polder.eager.value_array import AnyValueArray, SomeValueArray, ValueArrayNamespace
 from polder.protocols.array import (
     AnyDataFrame,
     ArrayAxisIndices,
@@ -22,16 +23,22 @@ def swap_args(f):
 
 
 @dataclass(frozen=True, eq=False)
-class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
+class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
     _labels: tuple[LabelFrameType | None, ...]
-    _values: Array
+    _values: SomeValueArray
 
     def __post_init__(self):
+        # Check that the value array's shape is determined.
+        assert all(isinstance(n, int) for n in self._values.shape)
         # Check that the labels and values have the same shape.
         labels_shape = tuple(
             len(labels) if labels is not None else 1 for labels in self._labels
         )
         assert labels_shape == self._values.shape
+
+    @cached_property
+    def array_namespace(self) -> ValueArrayNamespace[SomeValueArray]:
+        return array_namespace(self._values)
 
     @overload
     def labels(self, axis: int) -> LabelFrameType | None: ...
@@ -48,13 +55,16 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
             axis = slice(None)
         return self._labels[axis]
 
-    def values(self, *indices: ArrayAxisIndices) -> np.ndarray:
+    def values(self, *indices: ArrayAxisIndices) -> SomeValueArray:
         return self._values[indices or ...]
 
     def shape(self) -> tuple[int, ...]:
-        return self._values.shape
+        # The validity of the shape is checked during __post_init__.
+        return cast(tuple[int, ...], self._values.shape)
 
     def __getitem__(self, indices: AxisIndices | tuple[AxisIndices, ...]) -> Self:
+        xp = self.array_namespace
+
         if not isinstance(indices, tuple):
             indices = (indices,)
         assert len(indices) <= len(self._labels)
@@ -80,7 +90,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
                     "__value_index"
                 ).filter(idx)
                 labels[i] = filtered_axis_labels.select(axis_labels.columns)
-                value_idx = filtered_axis_labels["__value_index"].to_numpy()
+                value_idx = xp.asarray(filtered_axis_labels["__value_index"].to_numpy())
 
             # If we have a numerical indexer (int, int array or slice) we index both labels and
             # values with the indexer.
@@ -145,5 +155,6 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, Array]):
 
 
 SomeEagerFrameLabeledArray = TypeVar(
-    "SomeEagerFrameLabeledArray", bound=EagerFrameLabeledArray[AnyDataFrame]
+    "SomeEagerFrameLabeledArray",
+    bound=EagerFrameLabeledArray[AnyDataFrame, AnyValueArray],
 )

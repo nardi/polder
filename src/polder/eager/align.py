@@ -146,6 +146,11 @@ def align(
         check_only: If True, only check if the arrays are aligned, and if so return them. Will not
         modify anything.
     """
+    if not arrays:
+        return ()
+
+    # Get the array namespace corresponding to the first array.
+    xp = arrays[0].array_namespace
 
     # Extract labels and values for all arrays.
     all_labels = [list(arr.labels()) for arr in arrays]
@@ -216,6 +221,11 @@ def align(
                 for (array_idx, axis_idx), value_idx in zip(
                     alignable_label_frame_positions, value_indices, strict=True
                 ):
+                    # Convert value indices to the appropriate array type before
+                    # indexing.
+                    if isinstance(value_idx, np.ndarray):
+                        value_idx = xp.asarray(value_idx)
+
                     all_labels[array_idx][axis_idx] = aligned_labels_for_axis
                     all_values[array_idx] = all_values[array_idx][
                         (slice(None),) * axis_idx + (value_idx,)

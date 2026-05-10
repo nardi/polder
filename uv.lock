@@ -2,8 +2,30 @@ version = 1
 revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
-    "python_full_version >= '3.12'",
+    "python_full_version >= '3.13'",
+    "python_full_version == '3.12.*'",
     "python_full_version < '3.12'",
+]
+
+[[package]]
+name = "array-api-compat"
+version = "1.11.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/1e/d04312a19a67744298b7546885149488b8afbb965dfe693aa4964bb60586/array_api_compat-1.11.2.tar.gz", hash = "sha256:a3b7f7b6af18f4c42e79423b1b2479798998b6a74355069d77a01a5282755b5d", size = 50776, upload-time = "2025-03-20T13:11:55.095Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/d8/3388c7da49f522e51ab2f919797db28782216cadc9ecc9976160302cfcd6/array_api_compat-1.11.2-py3-none-any.whl", hash = "sha256:b1d0059714a4153b3ae37c989e47b07418f727be5b22908dd3cf9d19bdc2c547", size = 53149, upload-time = "2025-03-20T13:11:53.815Z" },
+]
+
+[[package]]
+name = "array-api-extra"
+version = "0.7.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "array-api-compat" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/56/93/a6e5bb88199ccfe8827d475b5b931eb1f3f762151a5061478e03a4098174/array_api_extra-0.7.2.tar.gz", hash = "sha256:c3fdb810cdf954748cbed5de9262d8ae478fd394e8e1b318cce30101c1a7a468", size = 185312, upload-time = "2025-05-11T22:09:58.874Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/15/ae22c82fcf7acaff41089c09496831297db0571b8b38f21adbeb39047168/array_api_extra-0.7.2-py3-none-any.whl", hash = "sha256:44f960b35b26d1c5d4ac5f8b84e22c20c1fd0ff20e9835437da653227e94603d", size = 41061, upload-time = "2025-05-11T22:09:57.532Z" },
 ]
 
 [[package]]
@@ -211,11 +233,16 @@ name = "polder"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "array-api-compat" },
+    { name = "array-api-extra" },
     { name = "immutabledict" },
     { name = "narwhals" },
     { name = "numpy" },
     { name = "optype", extra = ["numpy"] },
     { name = "ordered-set" },
+    { name = "types-array-api", version = "1.1.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "types-array-api", version = "1.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -226,11 +253,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "array-api-compat", specifier = "==1.11.2" },
+    { name = "array-api-extra", specifier = ">=0.7.2" },
     { name = "immutabledict", specifier = ">=4.3.1" },
     { name = "narwhals", specifier = ">=2.18.1" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "optype", extras = ["numpy"], specifier = ">=0.17.0" },
     { name = "ordered-set", specifier = ">=4.1.0" },
+    { name = "types-array-api", specifier = ">=1.1.4" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -262,6 +293,37 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d1/db/7ef3487e0fb0049ddb5ce41d3a49c235bf9ad299b6a25d5780a89f19230f/pytest-9.0.2.tar.gz", hash = "sha256:75186651a92bd89611d1d9fc20f0b4345fd827c41ccd5c299a868a05d70edf11", size = 1568901, upload-time = "2025-12-06T21:30:51.014Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/ab/b3226f0bd7cdcf710fbede2b3548584366da3b19b5021e74f5bde2a8fa3f/pytest-9.0.2-py3-none-any.whl", hash = "sha256:711ffd45bf766d5264d487b917733b453d917afd2b0ad65223959f59089f875b", size = 374801, upload-time = "2025-12-06T21:30:49.154Z" },
+]
+
+[[package]]
+name = "types-array-api"
+version = "1.1.4"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.12'",
+]
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/69/6c/082e7afbbbdaae72df4ce69a0348f48a9a59b8989a4c868724f6aa61cfb6/types_array_api-1.1.4.tar.gz", hash = "sha256:b9b564d1f96f9e229b146d045c7851f21e55c05a221c060aa325d3076eedbcb3", size = 371481, upload-time = "2025-06-29T13:30:04.768Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/e6/396c090049639f930a2754be08b6658ff8d8bb5602337711662ede6bb80a/types_array_api-1.1.4-py3-none-any.whl", hash = "sha256:efc59fd9f6ce1c68233bcb09d7c16fce7a9a2e0ba44d4bac0f6e22b29099a246", size = 374498, upload-time = "2025-06-29T13:30:03.297Z" },
+]
+
+[[package]]
+name = "types-array-api"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.13'",
+    "python_full_version == '3.12.*'",
+]
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/ea/c0e0850c44f5d0f0c94796882589d8aec92aee60059793af66d71c587cd2/types_array_api-1.3.0.tar.gz", hash = "sha256:918526e110c1008618cd9b4487f98aa518f3869efc67b0da2491ceff1b53efcd", size = 472136, upload-time = "2026-02-28T02:38:23.32Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/08/409256f4b35e5c06b1577270d27a31a4b0134851ca479aa9060c095e3e12/types_array_api-1.3.0-py3-none-any.whl", hash = "sha256:8cddba53e105f045f888f16c838f46df1296136423e4ae871ce9ab26bee275b1", size = 476920, upload-time = "2026-02-28T02:38:21.503Z" },
 ]
 
 [[package]]

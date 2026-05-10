@@ -5,10 +5,13 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
+import array_api_extra as xpx
 import narwhals as nw
 import narwhals.typing as nwt
 import numpy as np
+from typing_extensions import TypeAliasType
 
+from polder.eager.value_array import SomeValueArray, ValueArrayNamespace
 from polder.protocols.array import AnyDataFrame
 
 if TYPE_CHECKING:
@@ -19,7 +22,9 @@ _NO_FILL = object()
 AxisLabelsSpecifier: TypeAlias = Sequence[str]
 AxisLabelsToPivot: TypeAlias = AxisLabelsSpecifier | Sequence[AxisLabelsSpecifier]
 AxesSlice = tuple[int, int]
-Labels = Sequence[nwt.DataFrameT | None]
+Labels = TypeAliasType(
+    "Labels", Sequence[nwt.DataFrameT | None], type_params=(nwt.DataFrameT,)
+)
 
 
 def pivot(
@@ -58,25 +63,27 @@ def pivot(
     """
     values = arr.values()
     labels = tuple(arr.labels())
+    xp = arr.array_namespace
 
     # Pivot each axis one at a time, processing in descending order so earlier pivots do not affect
     # axis indices of later pivots.
     for axis in sorted(axis_labels_to_pivot.keys(), reverse=True):
         pivot_spec = axis_labels_to_pivot[axis]
         values, labels = _pivot_single_axis(
-            values, labels, axis, pivot_spec, fill_value
+            xp, values, labels, axis, pivot_spec, fill_value
         )
 
     return type(arr)(tuple(labels), values)
 
 
 def _pivot_single_axis(
-    values: np.ndarray,
+    xp: ValueArrayNamespace[SomeValueArray],
+    values: SomeValueArray,
     labels: Labels,
     axis: int,
     pivot_spec: AxisLabelsToPivot,
     fill_value: Any,
-) -> tuple[np.ndarray, Labels]:
+) -> tuple[SomeValueArray, Labels]:
     """Pivot a single axis, potentially creating one or more new axes."""
     # Normalize pivot_spec to a list of pivot groups, each specifying columns to pivot together.
     pivot_groups = _normalize_pivot_spec(pivot_spec)
@@ -85,7 +92,7 @@ def _pivot_single_axis(
     # the axis order).
     for pivot_cols in reversed(pivot_groups):
         values, labels = _pivot_single_group(
-            values, labels, axis, pivot_cols, fill_value
+            xp, values, labels, axis, pivot_cols, fill_value
         )
 
     return values, labels
@@ -102,12 +109,13 @@ def _normalize_pivot_spec(spec: AxisLabelsToPivot) -> list[list[str]]:
 
 
 def _pivot_single_group(
-    values: np.ndarray,
+    xp: ValueArrayNamespace[SomeValueArray],
+    values: SomeValueArray,
     labels: Labels,
     axis: int,
     pivot_cols: list[str],
     fill_value: Any,
-) -> tuple[np.ndarray, Labels]:
+) -> tuple[SomeValueArray, Labels]:
     """Pivot a single group of columns into a new axis."""
 
     labels_df = labels[axis]
@@ -158,19 +166,22 @@ def _pivot_single_group(
 
     if has_missing:
         missing_mask = np.isnan(value_idx.astype(float))
-        missing_idx = np.argwhere(missing_mask)
+        missing_idx = xp.asarray(np.argwhere(missing_mask))
         # Replace missing indices with 0 temporarily for indexing (these will later be filled with
         # `fill_value`).
         value_idx_valid = np.where(missing_mask, 0, value_idx).astype(int)
-        new_values = np.take(values, value_idx_valid, axis=axis)
+        new_values = xp.take(values, xp.asarray(value_idx_valid), axis=axis)
         # Fill missing indices with `fill_value`.
-        new_values[(slice(None),) * axis + (missing_idx[:, 0], missing_idx[:, 1])] = (
-            fill_value
-        )
+        # NOTE: the protocols from types-array-api and array-api-extra are not
+        # compatible. We just ignore the typing here for now.
+        new_values = xpx.at(new_values)[  # type: ignore
+            (slice(None),) * axis + (missing_idx[:, 0], missing_idx[:, 1])
+        ].set(fill_value)
+        new_values = cast(SomeValueArray, new_values)
     else:
         # All combinations present, just index the values array.
         value_idx_valid = value_idx.astype(int)
-        new_values = np.take(values, value_idx_valid, axis=axis)
+        new_values = xp.take(values, xp.asarray(value_idx_valid), axis=axis)
 
     # Insert labels in the correct place.
     new_labels = [*labels[:axis], keep_labels, pivot_labels, *labels[axis + 1 :]]
@@ -252,6 +263,6 @@ def unpivot(
         )
 
     # Extract and reshape the values.
-    values = arr.values().reshape(shape)
+    values = arr.array_namespace.reshape(arr.values(), shape)
 
     return type(arr)(labels, values)

@@ -6,11 +6,15 @@ readme = "README.md"
 authors = [{ name = "Nardi Lam", email = "mail@nardilam.nl" }]
 requires-python = ">=3.11"
 dependencies = [
+    "array-api-compat==1.11.2",
+    "array-api-extra>=0.7.2",
     "immutabledict>=4.3.1",
     "narwhals>=2.18.1",
     "numpy>=2.4.4",
     "optype[numpy]>=0.17.0",
     "ordered-set>=4.1.0",
+    "types-array-api>=1.1.4",
+    "typing-extensions>=4.15.0",
 ]
 
 [build-system]

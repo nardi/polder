@@ -2,8 +2,7 @@ import numpy as np
 import polars as pl
 
 import polder as pld
-from polder.eager.align import align
-from polder.eager.array import EagerFrameLabeledArray
+from polder.operations.align import align
 
 from .utils import generate_random_array, shuffle_labels
 
@@ -285,8 +284,7 @@ def test_equal_comparison():
     """Test equality comparison (element-wise)."""
     array1 = generate_random_array()
     array2 = generate_random_array(seed=123)  # Same seed
-    # TODO: figure out how to get this comparison to type properly.
-    result: EagerFrameLabeledArray = array1 == array2  # type: ignore
+    result = array1 == array2
     np.testing.assert_array_equal(result.values(), array1.values() == array2.values())
 
 
@@ -294,8 +292,7 @@ def test_not_equal_comparison():
     """Test not equal comparison (element-wise)."""
     array1 = generate_random_array()
     array2 = generate_random_array(seed=456)
-    # TODO: figure out how to get this comparison to type properly.
-    result: EagerFrameLabeledArray = array1 != array2  # type: ignore
+    result = array1 != array2
     np.testing.assert_array_equal(result.values(), array1.values() != array2.values())
 
 
