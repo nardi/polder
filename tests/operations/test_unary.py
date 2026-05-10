@@ -6,6 +6,8 @@ import pytest
 
 import polder as pld
 
+from ..utils import cast_value_array
+
 
 @pytest.mark.parametrize(
     "func,numpy_func,test_values",
@@ -48,7 +50,7 @@ import polder as pld
         (pld.logical_not, np.logical_not, np.array([[True, False], [False, True]])),
     ],
 )
-def test_unary_elementwise_functions(func, numpy_func, test_values):
+def test_unary_elementwise_functions(func, numpy_func, test_values, value_array_type):
     """Test unary elementwise functions against numpy equivalents."""
     # Cast to appropriate dtype for bitwise operations.
     if func is pld.bitwise_invert:
@@ -58,9 +60,12 @@ def test_unary_elementwise_functions(func, numpy_func, test_values):
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
     ]
-    arr = pld.from_values_and_labels(test_values, labels)
+    arr = pld.from_values_and_labels(
+        cast_value_array(test_values, value_array_type), labels
+    )
 
     result = func(arr)
+    assert isinstance(result.values(), value_array_type.value)
 
     # Compare to numpy.
     expected_values = numpy_func(test_values)
@@ -78,16 +83,19 @@ def test_unary_elementwise_functions(func, numpy_func, test_values):
         (pld.conj, np.conj),
     ],
 )
-def test_unary_complex_functions(func, numpy_func):
+def test_unary_complex_functions(func, numpy_func, value_array_type):
     """Test complex-valued unary functions."""
     test_values = np.array([[1 + 2j, 3 - 4j], [5 + 0j, 0 - 6j]])
     labels = [
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
     ]
-    arr = pld.from_values_and_labels(test_values, labels)
+    arr = pld.from_values_and_labels(
+        cast_value_array(test_values, value_array_type), labels
+    )
 
     result = func(arr)
+    assert isinstance(result.values(), value_array_type.value)
 
     expected_values = numpy_func(test_values)
     np.testing.assert_array_equal(result.values(), expected_values)
@@ -104,16 +112,19 @@ def test_unary_complex_functions(func, numpy_func):
         (pld.signbit, np.signbit),
     ],
 )
-def test_unary_classification_functions(func, numpy_func):
+def test_unary_classification_functions(func, numpy_func, value_array_type):
     """Test classification functions that return boolean or int."""
     test_values = np.array([[np.inf, -np.inf], [np.nan, 1.0]])
     labels = [
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
     ]
-    arr = pld.from_values_and_labels(test_values, labels)
+    arr = pld.from_values_and_labels(
+        cast_value_array(test_values, value_array_type), labels
+    )
 
     result = func(arr)
+    assert isinstance(result.values(), value_array_type.value)
 
     expected_values = numpy_func(test_values)
     np.testing.assert_array_equal(result.values(), expected_values)
