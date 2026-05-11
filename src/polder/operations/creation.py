@@ -1,18 +1,50 @@
+from __future__ import annotations
+
 from collections.abc import Iterable
-from typing import overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 import narwhals as nw
 import numpy as np
 from narwhals.typing import IntoDataFrameT
 
+if TYPE_CHECKING:
+    import polars as pl
+
 from polder.eager.array import EagerFrameLabeledArray
 from polder.eager.value_array import SomeValueArray
+from polder.lazy.array import LazyFrameLabeledArray
 from polder.protocols.array import AnyArray, FrameLabeledArray
+from polder.protocols.implementations import (
+    EAGER,
+    LAZY,
+    FrameLabeledArrayImplementation,
+)
 
 
 @overload
 def from_values_and_labels(
-    values: SomeValueArray, labels: Iterable[IntoDataFrameT]
+    values: AnyArray,
+    labels: Iterable[pl.DataFrame],
+    *,
+    implementation: Literal[FrameLabeledArrayImplementation.LAZY],
+) -> LazyFrameLabeledArray[pl.DataFrame, pl.LazyFrame]: ...
+
+
+@overload
+def from_values_and_labels(
+    values: AnyArray,
+    labels: Iterable[IntoDataFrameT],
+    *,
+    implementation: Literal[FrameLabeledArrayImplementation.LAZY],
+) -> LazyFrameLabeledArray[IntoDataFrameT, Any]: ...
+
+
+@overload
+def from_values_and_labels(
+    values: SomeValueArray,
+    labels: Iterable[IntoDataFrameT],
+    *,
+    implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
 ) -> EagerFrameLabeledArray[nw.DataFrame[IntoDataFrameT], SomeValueArray]: ...
 
 
@@ -21,7 +53,10 @@ def from_values_and_labels(
 # typecast here and let both library and user code be typed correctly.
 @overload
 def from_values_and_labels(
-    values: np.ndarray, labels: Iterable[IntoDataFrameT]
+    values: np.ndarray,
+    labels: Iterable[IntoDataFrameT],
+    *,
+    implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
 ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], np.ndarray]: ...
 
 
@@ -34,20 +69,63 @@ try:
 
     @overload
     def from_values_and_labels(
-        values: jax.Array, labels: Iterable[IntoDataFrameT]
+        values: jax.Array,
+        labels: Iterable[IntoDataFrameT],
+        *,
+        implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
     ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], jax.Array]: ...
 except ImportError:
     pass
 
 
 def from_values_and_labels(
-    values: AnyArray, labels: Iterable[IntoDataFrameT]
+    values: AnyArray,
+    labels: Iterable[IntoDataFrameT],
+    *,
+    implementation: FrameLabeledArrayImplementation = EAGER,
 ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], AnyArray]:
     label_dfs = tuple(map(nw.from_native, labels))
-    if isinstance(values, np.ndarray):
-        # np.ndarray doesn't type as Array for some reason.
-        return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
-    if maybe_jax is not None and isinstance(values, maybe_jax.Array):
-        # jax.Array also doesn't type as Array.
-        return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
+    match implementation:
+        case FrameLabeledArrayImplementation.EAGER:
+            if isinstance(values, np.ndarray):
+                # np.ndarray doesn't type as Array for some reason.
+                return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
+            if maybe_jax is not None and isinstance(values, maybe_jax.Array):
+                # jax.Array also doesn't type as Array.
+                return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
+        case FrameLabeledArrayImplementation.LAZY:
+            return LazyFrameLabeledArray.from_values_and_labels(values, label_dfs)
     raise NotImplementedError()
+
+
+@overload
+def from_frame(
+    frame: nw.DataFrame[pl.DataFrame],
+    *,
+    value_column: str = "value",
+    implementation: Literal[FrameLabeledArrayImplementation.LAZY] = ...,
+) -> LazyFrameLabeledArray[pl.DataFrame, pl.LazyFrame]: ...
+
+
+@overload
+def from_frame(
+    frame: nw.DataFrame[IntoDataFrameT],
+    *,
+    value_column: str = "value",
+    implementation: Literal[FrameLabeledArrayImplementation.LAZY] = ...,
+) -> LazyFrameLabeledArray[IntoDataFrameT, Any]: ...
+
+
+def from_frame(
+    frame: nw.DataFrame[IntoDataFrameT],
+    *,
+    value_column: str = "value",
+    implementation: FrameLabeledArrayImplementation = LAZY,
+) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], np.ndarray]:
+    lazy_array = LazyFrameLabeledArray.from_frame(frame, value_column=value_column)
+
+    match implementation:
+        case FrameLabeledArrayImplementation.LAZY:
+            return lazy_array
+        case FrameLabeledArrayImplementation.EAGER:
+            raise NotImplementedError()

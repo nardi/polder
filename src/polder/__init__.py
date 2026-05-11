@@ -1,5 +1,7 @@
 from polder import config
-from polder.operations.creation import from_values_and_labels
+from polder.eager.array import EagerFrameLabeledArray
+from polder.lazy.array import LazyFrameLabeledArray
+from polder.operations.creation import from_frame, from_values_and_labels
 from polder.operations.unary import (
     abs_,
     acos,
@@ -41,9 +43,21 @@ from polder.operations.unary import (
     tanh,
     trunc,
 )
+from polder.protocols.array import FrameLabeledArray
+from polder.protocols.implementations import (
+    EAGER,
+    LAZY,
+    FrameLabeledArrayImplementation,
+)
 
 __all__ = [
+    # Config interface
     "config",
+    # Implementations
+    "EagerFrameLabeledArray",
+    "LazyFrameLabeledArray",
+    # Creation operations
+    "from_frame",
     "from_values_and_labels",
     # Unary operations
     "pos",
@@ -85,4 +99,9 @@ __all__ = [
     "tan",
     "tanh",
     "trunc",
+    # Protocol-related objects
+    "FrameLabeledArray",
+    "EAGER",
+    "LAZY",
+    "FrameLabeledArrayImplementation",
 ]
