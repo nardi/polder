@@ -27,10 +27,10 @@ class LazyFrameLabeledArray(
 
     _indexed_labels: tuple[nw.LazyFrame[InternalFrameType] | None, ...]
     """The labels for each axis in the array. These contain an additional column
-    `index` which specifies the ordering."""
+    `__index` which specifies the ordering."""
     _values: nw.LazyFrame[InternalFrameType]
     """The values for the array. These are stored in long format, with an
-    index-column for each axis named `index0`, `index1`, etc. and a single
+    index-column for each axis named `__index0`, `__index1`, etc. and a single
     `value` column."""
     _shape: nw.LazyFrame[InternalFrameType]
     """The shape of the array. Because the values are lazily computed, this is a
@@ -67,12 +67,12 @@ class LazyFrameLabeledArray(
         )
         values_frame = nw.from_numpy(
             indexed_values,
-            schema=[*[f"index{i}" for i in range(n_dims)], "value"],
+            schema=[*[f"__index{i}" for i in range(n_dims)], "value"],
             backend=frame_ns,
         ).lazy()
 
         indexed_labels = tuple(
-            axis_labels.with_row_index("index").lazy()
+            axis_labels.with_row_index("__index").lazy()
             if axis_labels is not None
             else None
             for axis_labels in labels
@@ -96,19 +96,19 @@ class LazyFrameLabeledArray(
 
         # Split the frame into labels and values, addding an index to each.
         labels = (
-            frame.select(nw.exclude(value_column)).with_row_index("index").lazy(),
+            frame.select(nw.exclude(value_column)).with_row_index("__index").lazy(),
         )
         values = (
             frame.select(value_column)
             .rename({value_column: "value"})
-            .with_row_index("index0")
+            .with_row_index("__index0")
             .lazy()
         )
 
         return LazyFrameLabeledArray(labels, values, shape, n_dims, frame_ns)
 
     def values(self, *indices: ArrayAxisIndices) -> np.ndarray:
-        index_columns = [f"index{i}" for i in range(self._n_dims)]
+        index_columns = [f"__index{i}" for i in range(self._n_dims)]
         values = (
             self._values.sort(index_columns)
             .drop(index_columns)
@@ -149,7 +149,9 @@ class LazyFrameLabeledArray(
             # deduced by the type checker, so we do a cast.
             return cast(
                 nw.DataFrame[ExternalFrameType],
-                axis_labels.sort("index").drop("index").collect(backend=self._frame_ns),
+                axis_labels.sort("__index")
+                .drop("__index")
+                .collect(backend=self._frame_ns),
             )
 
         if isinstance(selected_labels, tuple):
