@@ -15,7 +15,8 @@ ValueArrayType = TypeVar("ValueArrayType", bound=AnyArray, covariant=True)
 
 
 ArrayAxisIndices: TypeAlias = int | slice | ValueArrayType
-AxisIndices: TypeAlias = ArrayAxisIndices | Expr
+LabelAxisIndices: TypeAlias = Mapping[str, Any] | Expr
+AxisIndices: TypeAlias = ArrayAxisIndices | LabelAxisIndices
 
 Scalar: TypeAlias = int | float | complex | bool
 
@@ -51,8 +52,32 @@ class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
         ...
 
     def __getitem__(self, indices: AxisIndices | tuple[AxisIndices, ...]) -> Self:
-        """Index the array, either using numerical indices, or using Narwhals
-        expressions which will be used to filter the labels."""
+        """Index the array, either using numerical indices, or by filtering the
+        labels.
+
+        Given an N-dimensional array, there are a few different methods of
+        indexing:
+          1. Single-valued numerical indexing: when an axis is indexed with a
+             single number, the N-1 dimensional slice at that location is
+             returned.
+          2. Multi-valued numerical indexing: when an axis is indexed with a
+             slice or a numerical array (of same type as `values`), the array is
+             sliced along that axis and the N-dimensional result is returned.
+          3. Simple label filtering: when an axis is indexed with a mapping
+             (e.g. `dict`), it is used to filter the labels of that axis. The
+             keys are taken to refer to columns in the label frame, and the
+             values to the single value that is kept for that column. After
+             this, the column is removed from the label frame (analogous to type
+             1 indexing). If it is the only column in the label frame, the whole
+             axis is removed and the result will be N-1 dimensional.
+          4. Complex label filtering: when an axis is indexed with a Narwhals
+             expression, that expression is used to `filter` the label frame for
+             that axis. The width of the label frame or dimensionality of the
+             array is not changed.
+          5. Axis creation indexing: when `None` is used to index the array at
+             position `i`, a new size-1 unlabeled axis will be created between
+             the current axes `i-1` and `i`. This can be useful to perform
+             broadcasting."""
         ...
 
     def equals(self, other: Self, /) -> bool: ...

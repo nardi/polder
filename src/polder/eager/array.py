@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Self, TypeVar, cast, overload
@@ -10,7 +10,12 @@ import polder.eager.binary as binary
 import polder.eager.unary as unary
 from polder.eager.labels import Labels
 from polder.eager.pivot import pivot, unpivot
-from polder.eager.value_array import AnyValueArray, SomeValueArray, ValueArrayNamespace
+from polder.eager.value_array import (
+    AnyValueArray,
+    SomeValueArray,
+    ValueArrayNamespace,
+    array_equal,
+)
 from polder.protocols.array import (
     AnyDataFrame,
     ArrayAxisIndices,
@@ -77,41 +82,83 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
 
         if not isinstance(indices, tuple):
             indices = (indices,)
-        assert len(indices) <= len(self._labels)
 
         labels = list(self._labels)
         values = self._values
 
         # Index each axis one-by-one.
+        n_removed_axes = 0
         for i, idx in enumerate(indices):
-            axis_labels = labels[i]
+            # If we have removed some axes, later ones will shift to the left,
+            # so we have to compensate for this in the indexing.
+            j = i - n_removed_axes
 
             # If the index is None, we want to add an unlabeled axis.
             if idx is None:
-                labels.insert(i, None)
+                labels.insert(j, None)
                 value_idx = None
 
-            # If we are indexing with an Expr, filter the axis labels and then use the result to
-            # index the values.
+            # If we are indexing with a mapping, filter the axis labels and
+            # remove the filtered columns. Then use the result to index the
+            # values.
+            elif isinstance(idx, Mapping):
+                axis_labels = labels[j]
+                if axis_labels is None:
+                    raise Exception("Cannot index unlabeled index with a mapping")
+                filtered_axis_labels = axis_labels.with_row_index(
+                    "__value_index"
+                ).filter(**idx)
+                unfiltered_columns = [
+                    col for col in axis_labels.columns if col not in idx
+                ]
+                if unfiltered_columns:
+                    labels[j] = filtered_axis_labels.select(unfiltered_columns)
+                    value_idx = xp.asarray(
+                        filtered_axis_labels["__value_index"].to_numpy()
+                    )
+                else:
+                    # If there are no unfiltered columns left, remove the axis
+                    # entirely.
+                    labels.pop(j)
+                    n_removed_axes += 1
+                    value_idx = filtered_axis_labels["__value_index"].item()
+
+            # If we are indexing with an Expr, filter the axis labels and then
+            # use the result to index the values.
             elif isinstance(idx, Expr):
+                axis_labels = labels[j]
                 if axis_labels is None:
                     raise Exception("Cannot index unlabeled index with an expression")
                 filtered_axis_labels = axis_labels.with_row_index(
                     "__value_index"
                 ).filter(idx)
-                labels[i] = filtered_axis_labels.select(axis_labels.columns)
+                labels[j] = filtered_axis_labels.select(axis_labels.columns)
                 value_idx = xp.asarray(filtered_axis_labels["__value_index"].to_numpy())
 
-            # If we have a numerical indexer (int, int array or slice) we index both labels and
-            # values with the indexer.
-            else:
-                if axis_labels is None and values.shape[i] != 1:
-                    raise Exception("Cannot grow unlabeled index to multiple values")
-                elif axis_labels is not None:
-                    labels[i] = axis_labels[idx, :]
+            # If we have a single-valued numerical indexer, indexing the values
+            # will lower the array by 1 dimension, so remove the axis in the
+            # labels as well.
+            elif isinstance(idx, int):
+                labels.pop(j)
+                n_removed_axes += 1
                 value_idx = idx
 
-            values = values[(slice(None),) * i + (value_idx,)]
+            # If we have a numerical indexer (int array or slice) we index
+            # both labels and values with the indexer.
+            else:
+                axis_labels = labels[j]
+                if axis_labels is None:
+                    # For unlabeled axes, we only allow indexing with `:`.
+                    idx_is_full_slice = isinstance(idx, slice) and idx == slice(None)
+                    if not idx_is_full_slice:
+                        raise Exception(
+                            "Cannot index unlabeled index with multi-valued indexer"
+                        )
+                else:
+                    labels[j] = axis_labels[idx, :]
+                value_idx = idx
+
+            values = values[(slice(None),) * j + (value_idx,)]
 
         return self.create(labels, values)
 
