@@ -2,6 +2,7 @@ import numpy as np
 import polars as pl
 
 import polder as pld
+from polder.eager.labels import Labels
 from polder.operations.align import align
 
 from ..utils import generate_random_array, shuffle_labels
@@ -352,6 +353,7 @@ def test_broadcasting_scalar_preserves_array_labels(value_array_type):
 
     # The labels should still be present
     assert len(result_labels) == len(original_labels)
+    assert all(l1 is l2 for l1, l2 in zip(result_labels, original_labels))
 
 
 def test_operation_with_shuffled_axes(value_array_type):
@@ -422,3 +424,29 @@ def test_matmul_2d_arrays():
     assert result2.shape() == (2, 4)
     _, result2 = align(result, result2)
     np.testing.assert_array_almost_equal(result2.values(), result.values())
+
+
+def test_broadcasting_with_unlabeled_axes(value_array_type):
+    # Create two 1-dimensional arrays (vectors).
+    array1 = generate_random_array(value_array_type, shape=(4,), seed=123)
+    array2 = generate_random_array(value_array_type, shape=(3,), seed=456)
+
+    # Calculate the outer product of the two vectors using broadcasting.
+    result = array1[:, None] * array2[None, :]
+
+    assert result.shape() == (4, 3)
+    assert Labels(result.labels()) == Labels([array1.labels(0), array2.labels(0)])
+    assert isinstance(result.values(), value_array_type.value)
+    np.testing.assert_array_equal(
+        result.values(), array1.values()[:, None] * array2.values()[None, :]
+    )
+
+    # Make sure we can also broadcast an unlabeled axis with a labeled one.
+    result2 = result + array1[None, :-1]
+
+    assert result2.shape() == (4, 3)
+    assert Labels(result2.labels()) == Labels(result.labels())
+    assert isinstance(result2.values(), value_array_type.value)
+    np.testing.assert_array_equal(
+        result2.values(), result.values() + array1.values()[None, :-1]
+    )
