@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sequence
 from typing import Any, Generic, Protocol, Self, TypeAlias, TypeVar, overload
 
 from narwhals import DataFrame, Expr
+from typing_extensions import TypeAliasType
+
+from polder.protocols.descriptor import Descriptor
 
 AnyDataFrame: TypeAlias = DataFrame[Any]
 
@@ -11,12 +16,18 @@ class AnyArray(Protocol):
 
 
 LabelFrameType = TypeVar("LabelFrameType", bound=AnyDataFrame, covariant=True)
-ValueArrayType = TypeVar("ValueArrayType", bound=AnyArray, covariant=True)
+ValueArrayType = TypeVar("ValueArrayType", bound=AnyArray)
 
 
-ArrayAxisIndices: TypeAlias = int | slice | ValueArrayType
+ArrayAxisIndices = TypeAliasType(
+    "ArrayAxisIndices", int | slice | ValueArrayType, type_params=(ValueArrayType,)
+)
 LabelAxisIndices: TypeAlias = Mapping[str, Any] | Expr
-AxisIndices: TypeAlias = ArrayAxisIndices | LabelAxisIndices
+AxisIndices = TypeAliasType(
+    "AxisIndices",
+    ArrayAxisIndices[ValueArrayType] | LabelAxisIndices,
+    type_params=(ValueArrayType,),
+)
 
 Scalar: TypeAlias = int | float | complex | bool
 
@@ -26,11 +37,10 @@ AxesSlice = tuple[int, int]
 
 
 class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
-    def values(self, *indices: ArrayAxisIndices) -> ValueArrayType:
-        """The value array that is being labeled. Can be any type that supports
-        the Array API. Allows Numpy-style indexing to return a part of the
-        array, which may be more efficient."""
-        ...
+    values: Descriptor[Self, ValuesIndexer[ValueArrayType]]
+    """The value array that is being labeled. Can be any type that supports
+    the Array API. Allows Numpy-style indexing to return a part of the
+    array, which may be more efficient."""
 
     @overload
     def labels(self, axis: int) -> LabelFrameType | None: ...
@@ -51,7 +61,10 @@ class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
         """The shape of the array."""
         ...
 
-    def __getitem__(self, indices: AxisIndices | tuple[AxisIndices, ...]) -> Self:
+    def __getitem__(
+        self,
+        indices: AxisIndices[ValueArrayType] | tuple[AxisIndices[ValueArrayType], ...],
+    ) -> Self:
         """Index the array, either using numerical indices, or by filtering the
         labels.
 
@@ -142,6 +155,19 @@ class FrameLabeledArray(Generic[LabelFrameType, ValueArrayType], Protocol):
     def __ne__(self, other: Self | Scalar, /) -> Self: ...  # type: ignore
 
 
-AnyFrameLabeledArray: TypeAlias = FrameLabeledArray[AnyDataFrame, AnyArray]
+AnyFrameLabeledArray: TypeAlias = FrameLabeledArray[Any, Any]
 
-SomeFrameLabeledArray = TypeVar("SomeFrameLabeledArray", bound="AnyFrameLabeledArray")
+SomeFrameLabeledArray = TypeVar("SomeFrameLabeledArray", bound=AnyFrameLabeledArray)
+
+
+class ValuesIndexer(Generic[ValueArrayType], Protocol):
+    def __call__(
+        self, *indices: ArrayAxisIndices[ValueArrayType]
+    ) -> ValueArrayType: ...
+
+    def __getitem__(
+        self,
+        indices: ArrayAxisIndices[ValueArrayType]
+        | tuple[ArrayAxisIndices[ValueArrayType], ...],
+        /,
+    ) -> ValueArrayType: ...

@@ -10,12 +10,7 @@ import polder.eager.binary as binary
 import polder.eager.unary as unary
 from polder.eager.labels import Labels
 from polder.eager.pivot import pivot, unpivot
-from polder.eager.value_array import (
-    AnyValueArray,
-    SomeValueArray,
-    ValueArrayNamespace,
-    array_equal,
-)
+from polder.eager.value_array import AnyValueArray, SomeValueArray, ValueArrayNamespace
 from polder.protocols.array import (
     AnyDataFrame,
     ArrayAxisIndices,
@@ -23,6 +18,7 @@ from polder.protocols.array import (
     FrameLabeledArray,
     LabelFrameType,
 )
+from polder.utils.indexer import indexermethod
 
 
 def swap_args(f):
@@ -70,7 +66,8 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
             axis = slice(None)
         return self._labels[axis]
 
-    def values(self, *indices: ArrayAxisIndices) -> SomeValueArray:
+    @indexermethod
+    def values(self, *indices: ArrayAxisIndices[SomeValueArray]) -> SomeValueArray:
         return self._values[indices or ...]
 
     def shape(self) -> tuple[int, ...]:

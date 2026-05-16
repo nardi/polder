@@ -438,7 +438,7 @@ def test_broadcasting_with_unlabeled_axes(value_array_type):
     assert Labels(result.labels()) == Labels([array1.labels(0), array2.labels(0)])
     assert isinstance(result.values(), value_array_type.value)
     np.testing.assert_array_equal(
-        result.values(), array1.values()[:, None] * array2.values()[None, :]
+        result.values(), array1.values[:, None] * array2.values[None, :]
     )
 
     # Make sure we can also broadcast an unlabeled axis with a labeled one.
@@ -448,5 +448,5 @@ def test_broadcasting_with_unlabeled_axes(value_array_type):
     assert Labels(result2.labels()) == Labels(result.labels())
     assert isinstance(result2.values(), value_array_type.value)
     np.testing.assert_array_equal(
-        result2.values(), result.values() + array1.values()[None, :-1]
+        result2.values(), result.values() + array1.values[None, :-1]
     )
