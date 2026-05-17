@@ -24,7 +24,7 @@ from polder.protocols.implementations import (
 @overload
 def from_values_and_labels(
     values: AnyArray,
-    labels: Iterable[pl.DataFrame],
+    labels: Iterable[pl.DataFrame | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.LAZY],
 ) -> LazyFrameLabeledArray[pl.DataFrame, pl.LazyFrame]: ...
@@ -33,7 +33,7 @@ def from_values_and_labels(
 @overload
 def from_values_and_labels(
     values: AnyArray,
-    labels: Iterable[IntoDataFrameT],
+    labels: Iterable[IntoDataFrameT | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.LAZY],
 ) -> LazyFrameLabeledArray[IntoDataFrameT, Any]: ...
@@ -42,7 +42,7 @@ def from_values_and_labels(
 @overload
 def from_values_and_labels(
     values: SomeValueArray,
-    labels: Iterable[IntoDataFrameT],
+    labels: Iterable[IntoDataFrameT | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
 ) -> EagerFrameLabeledArray[nw.DataFrame[IntoDataFrameT], SomeValueArray]: ...
@@ -54,7 +54,7 @@ def from_values_and_labels(
 @overload
 def from_values_and_labels(
     values: np.ndarray,
-    labels: Iterable[IntoDataFrameT],
+    labels: Iterable[IntoDataFrameT | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
 ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], np.ndarray]: ...
@@ -70,7 +70,7 @@ try:
     @overload
     def from_values_and_labels(
         values: jax.Array,
-        labels: Iterable[IntoDataFrameT],
+        labels: Iterable[IntoDataFrameT | None],
         *,
         implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
     ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], jax.Array]: ...
@@ -80,19 +80,22 @@ except ImportError:
 
 def from_values_and_labels(
     values: AnyArray,
-    labels: Iterable[IntoDataFrameT],
+    labels: Iterable[IntoDataFrameT | None],
     *,
     implementation: FrameLabeledArrayImplementation = EAGER,
-) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], AnyArray]:
-    label_dfs = tuple(map(nw.from_native, labels))
+) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], Any]:
+    label_dfs = tuple(
+        nw.from_native(axis_labels) if axis_labels is not None else None
+        for axis_labels in labels
+    )
     match implementation:
         case FrameLabeledArrayImplementation.EAGER:
             if isinstance(values, np.ndarray):
                 # np.ndarray doesn't type as Array for some reason.
-                return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
+                return EagerFrameLabeledArray.from_values_and_labels(values, label_dfs)  # type: ignore
             if maybe_jax is not None and isinstance(values, maybe_jax.Array):
                 # jax.Array also doesn't type as Array.
-                return EagerFrameLabeledArray.create(label_dfs, values)  # type: ignore
+                return EagerFrameLabeledArray.from_values_and_labels(values, label_dfs)  # type: ignore
         case FrameLabeledArrayImplementation.LAZY:
             return LazyFrameLabeledArray.from_values_and_labels(values, label_dfs)
     raise NotImplementedError()

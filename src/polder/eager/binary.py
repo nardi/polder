@@ -60,7 +60,7 @@ def _generate_binop(op: Callable):
             xp = ref_array.array_namespace
             labels = tuple(None for _ in ref_array._labels)
             values = xp.full((1,) * len(labels), scalar)
-            return ref_array.create(labels, values)
+            return ref_array.from_values_and_labels(values, labels)
 
         if isinstance(left, EagerFrameLabeledArray) and isinstance(
             right, EagerFrameLabeledArray
@@ -88,7 +88,7 @@ def _generate_binop(op: Callable):
             for l1, l2 in zip(left_array._labels, right_array._labels, strict=True)
         )
         values = op(left_array._values, right_array._values)
-        return left_array.create(labels, values)
+        return left_array.from_values_and_labels(values, labels)
 
     return _perform_binop
 
@@ -112,7 +112,7 @@ def matmul(
     # Construct result labels: all but last from left, all but first from right.
     result_labels = tuple(list(left._labels[:-1]) + list(right._labels[1:]))
 
-    return left.create(result_labels, result_values)
+    return left.from_values_and_labels(result_values, result_labels)
 
 
 # Arithmetic operators

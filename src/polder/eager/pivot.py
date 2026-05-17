@@ -73,7 +73,7 @@ def pivot(
             xp, values, labels, axis, pivot_spec, fill_value
         )
 
-    return arr.create(labels, values)
+    return arr.from_values_and_labels(values, labels)
 
 
 def _pivot_single_axis(
@@ -265,4 +265,4 @@ def unpivot(
     # Extract and reshape the values.
     values = arr.array_namespace.reshape(arr.values(), shape)
 
-    return arr.create(labels, values)
+    return arr.from_values_and_labels(values, labels)

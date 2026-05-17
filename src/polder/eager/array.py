@@ -31,8 +31,8 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
     _values: SomeValueArray
 
     @classmethod
-    def create(
-        cls, labels: Sequence[LabelFrameType | None], values: SomeValueArray
+    def from_values_and_labels(
+        cls, values: SomeValueArray, labels: Sequence[LabelFrameType | None]
     ) -> Self:
         return cls(Labels(labels), values)
 
@@ -157,7 +157,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
 
             values = values[(slice(None),) * j + (value_idx,)]
 
-        return self.create(labels, values)
+        return self.from_values_and_labels(values, labels)
 
     equals = binary.equals
     pivot = pivot

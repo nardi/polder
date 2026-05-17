@@ -190,7 +190,7 @@ def align(
                     ]
 
     return tuple(
-        original_array.create(array_labels, array_values)
+        original_array.from_values_and_labels(array_values, array_labels)
         for original_array, array_labels, array_values in zip(
             arrays, all_labels, all_values, strict=True
         )
