@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import cached_property
 from types import ModuleType
 from typing import Any, Generic, Self, TypeAlias, TypeVar, cast, overload
 
@@ -10,11 +11,22 @@ import narwhals.typing as nwt
 import numpy as np
 
 from polder.protocols.array import AnyArray, ArrayAxisIndices, FrameLabeledArray
+from polder.utils.indexer import indexermethod
 
 AnyExternalFrame: TypeAlias = nwt.IntoDataFrame
 ExternalFrameType = TypeVar("ExternalFrameType", bound=AnyExternalFrame)
 AnyInternalFrame: TypeAlias = nwt.IntoLazyFrame
 InternalFrameType = TypeVar("InternalFrameType", bound=AnyInternalFrame)
+
+
+def _create_index_df(shape: Sequence[int], frame_ns: ModuleType):
+    n_dims = len(shape)
+    indices = np.indices(shape).reshape((n_dims), -1).T
+    return nw.from_numpy(
+        indices,
+        schema=[f"__index{i}" for i in range(n_dims)],
+        backend=frame_ns,
+    )
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -60,16 +72,11 @@ class LazyFrameLabeledArray(
             backend=frame_ns,
         ).lazy()
 
-        indexed_values = (
-            np.concatenate([np.indices(values.shape), values[None]], axis=0)
-            .reshape((n_dims + 1), -1)
-            .T
+        values_frame = (
+            _create_index_df(values.shape, frame_ns)
+            .with_columns(value=values.reshape((-1,)))
+            .lazy()
         )
-        values_frame = nw.from_numpy(
-            indexed_values,
-            schema=[*[f"__index{i}" for i in range(n_dims)], "value"],
-            backend=frame_ns,
-        ).lazy()
 
         indexed_labels = tuple(
             axis_labels.with_row_index("__index").lazy()
@@ -107,15 +114,23 @@ class LazyFrameLabeledArray(
 
         return LazyFrameLabeledArray(labels, values, shape, n_dims, frame_ns)
 
+    @indexermethod
     def values(self, *indices: ArrayAxisIndices) -> np.ndarray:
-        index_columns = [f"__index{i}" for i in range(self._n_dims)]
-        values = (
-            self._values.sort(index_columns)
-            .drop(index_columns)
-            .collect()["value"]
-            .to_numpy()
-            .reshape(self.shape())
+        value_index = _create_index_df(self.shape(), self._frame_ns)
+        index_columns = value_index.columns
+        indexed_values = (
+            value_index.lazy()
+            .join(self._values, on=index_columns, how="left")
+            .sort(index_columns)
+            .collect()
         )
+
+        if indexed_values.select(
+            nw.any_horizontal(nw.col("value").is_null().any(), ignore_nulls=True)
+        ).item():
+            raise ValueError("Array has indices for which no value is stored")
+
+        values = indexed_values["value"].to_numpy().reshape(self.shape())
 
         # TODO: filter on indices before converting to array.
         values = values[indices or ...]
@@ -165,7 +180,30 @@ class LazyFrameLabeledArray(
         return None
 
     def shape(self) -> Sequence[int]:
-        return tuple(self._shape.sort("axis").select("size").collect()["size"])
+        return self._evaluated_shape
+
+    @cached_property
+    def _evaluated_shape(self) -> Sequence[int]:
+        axes = nw.from_numpy(
+            np.arange(self._n_dims, dtype=int)[:, None],
+            schema=["axis"],
+            backend=self._frame_ns,
+        )
+        shape = (
+            axes.lazy().join(self._shape, on="axis", how="left").sort("axis").collect()
+        )
+
+        is_valid_shape = (
+            len(shape) == len(axes)
+            and not shape.select(
+                nw.any_horizontal(nw.col("size").is_null().any(), ignore_nulls=True)
+            ).item()
+        )
+
+        if not is_valid_shape:
+            raise ValueError("Array has invalid shape")
+
+        return tuple(shape["size"])
 
     def __getitem__(
         self,
@@ -296,3 +334,9 @@ class LazyFrameLabeledArray(
 
     def __ne__(self, other: Self | int | float | complex | bool) -> Self:
         raise NotImplementedError
+
+
+AnyLazyFrameLabeledArray = LazyFrameLabeledArray[AnyExternalFrame, AnyInternalFrame]
+SomeLazyFrameLabeledArray = TypeVar(
+    "SomeLazyFrameLabeledArray", bound=AnyLazyFrameLabeledArray
+)

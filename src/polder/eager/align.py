@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING, Generic, NamedTuple, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Generic, NamedTuple, TypeAlias
 
 import numpy as np
-from immutabledict import immutabledict
 from narwhals.typing import DataFrameT
 
 from polder.eager._narwhals_df_equals import narwhals_df_equals
 from polder.protocols.array import AnyDataFrame
+from polder.utils.orderedset import orderedset
 
 if TYPE_CHECKING:
     from polder.eager.array import SomeEagerFrameLabeledArray
@@ -17,15 +17,6 @@ if TYPE_CHECKING:
 class AlignmentResults(Generic[DataFrameT], NamedTuple):
     labels: DataFrameT | None
     value_indices: tuple[slice | np.ndarray, ...]
-
-
-T = TypeVar("T")
-
-OrderedSet: TypeAlias = immutabledict[T, None]
-
-
-def orderedset(items: Iterable[T]) -> OrderedSet[T]:
-    return immutabledict.fromkeys(items)
 
 
 def _align_labels(label_frames: Sequence[DataFrameT]) -> AlignmentResults[DataFrameT]:

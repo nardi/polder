@@ -3,6 +3,8 @@ from typing import TypeAlias, cast
 
 from polder.eager.align import align as eager_align
 from polder.eager.array import EagerFrameLabeledArray
+from polder.lazy.align import align as lazy_align
+from polder.lazy.array import LazyFrameLabeledArray
 from polder.protocols.array import SomeFrameLabeledArray
 
 AxisNumbers: TypeAlias = tuple[int, ...]
@@ -40,4 +42,15 @@ def align(
             ),
         )
 
-    raise NotImplementedError()
+    if all(isinstance(arr, LazyFrameLabeledArray) for arr in arrays):
+        lazy_arrays = cast(tuple[LazyFrameLabeledArray, ...], arrays)
+        return cast(
+            tuple[SomeFrameLabeledArray, ...],
+            lazy_align(
+                *lazy_arrays,
+                axes=axes,
+                check_only=check_only,
+            ),
+        )
+
+    raise NotImplementedError("`align` is not implemented for this array type")
