@@ -38,13 +38,27 @@ It is also quite similar to [Xarray](https://docs.xarray.dev/en/stable/), which 
 
 ## Status
 
-Currently, there is only a work-in-progress Numpy-backed implementation which is entirely eager (every operation is fully resolved immediately), and acts as a reference to design the API around. This API will be codified into a protocol, and other implementations of it are planned as well:
+At the center of the library is the `FrameLabeledArray` protocol, which is what user code should be written against. This protocol currently supports a number of basic functionalities:
+- Decomposing into `values` (array-like) and `labels` (sequence of DataFrame-likes).
+- Indexing (NumPy-style), which also supports indexing using Narwhals expressions.
+- Pivoting: splitting a single axis into multiple, by orthogonally decomposing the labels into seperate dimensions corresponding to different label columns (and the reverse, "unpivoting").
+- All special (dunder) operations as defined in the [array API](https://data-apis.org/array-api/latest/).
 
-1. An implementation that is eager but supports any array that follows the [array API](https://data-apis.org/array-api/latest/). This should already be mostly possible with the initial implementation, but some accomodations will be needed for other libraries, and typing is a bit tricky since there is no comprehensive array API typing library.
-2. An implementation that acts eagerly on arrays, but performs lazy indexing/reordering of values. This will make use of Narwhals lazy API for the labels, allowing to e.g. perform multiple slicing/reshaping operations without making excess copies of the array values. Since a lot of code has a "transformation → computation → transformation" flow, where the transformation steps are mostly reordering data but not changing the values, and the computation wants to keep the data in its most efficient shape, this handoff can be a natural transition point between the relational operations on the metadata and the array-based operations in the computational core.
-3. An implementation that is entirely backed by a DataFrame (or multiple). This is useful when you only want to express your operations in an array-style, but don't actually care about the way the values are stored and don't need any special interop with array-based libraries. In this case it will be possible to execute basically all operations in a lazy manner, and let the backend query engine optimize large computations.
+This protocol is supported by a number of generic operations:
+- Creation: `pld.from_values_and_labels`, `pld.from_frame`
+- Alignment: reordering multiple arrays so that their labels match up (this usually happens automatically when performing other operations).
+- Unary elementwise operations as defined in the [array API](https://data-apis.org/array-api/latest/) (e.g. `pld.sin(arr)`).
+
+Then, there are currently two implementations of the protocol:
+
+1. An implementation that is eager (every operation is fully resolved immediately) and in principle supports any array that follows the [array API](https://data-apis.org/array-api/latest/). Currently there is "real" support (i.e. with tests and proper typing) for NumPy and JAX arrays. Note that JAX is an optional dependency, so if you are using the library you have to install it manually, but this is usually already the case (how else would you pass in a JAX array?). This implementation supports all functionality defined in the protocol.
+2. An implementation that is entirely backed by Narwhals LazyFrames, and evaluates all operations lazily. This is useful when you only want to express your operations in an array-style and don't need any special interop with array-based libraries, but either don't care about the way the values are stored, or already have your data in a DataFrame format supported by Narwhals and would like to keep all operations within that format. Using this implementation you can keep your data in the same backend it already is, and use whatever query engine that backend has to optimize large computations. This implementation is in early development and does not yet support all functionality.
 
 The advantage of having multiple implementations is also that you can convert easily between them. It might make sense to first perform some processing fully in the relational context, so more of the computation can be efficiently handled by a single query engine, and then switch over to the hybrid model when some interop with array-libraries is important.
+
+Ideas for future implementations are:
+
+1. An implementation that acts eagerly on arrays, but performs lazy indexing/reordering of values. This will make use of Narwhals lazy API for the labels, allowing to e.g. perform multiple slicing/reshaping operations without making excess copies of the array values. Since a lot of code has a "transformation → computation → transformation" flow, where the transformation steps are mostly reordering data but not changing the values, and the computation wants to keep the data in its most efficient shape, this handoff can be a natural transition point between the relational operations on the metadata and the array-based operations in the computational core.
 
 ## Development guidelines
 
@@ -56,7 +70,7 @@ The main data container is `FrameLabeledArray`, which is provided as a protocol.
 
 To be more flexible in code reuse vs specialization for efficiency, the various implementations don't inherit from a common ancestor. Instead they all implement the protocol, but are free to vary in implementation arbitrarily. As such the decision whether something should be in the protocol or not is quite significant, as it should generalize to all implementations, and it will also mean that users will write code against it. For those reasons stability of the protocol is quite important.
 
-The protocol should mostly follow the [array API](https://data-apis.org/array-api/latest/), since the labeled array objects are arrays first. Additional functionality (such as `align` or `reindex`) are defined if they make sense for the format. Some array API functionality is also extended, such as indexing with an expression (that will filter the labels) or reshaping along label dimensions instead of giving an explicit shape.
+The protocol should mostly follow the [array API](https://data-apis.org/array-api/latest/), since the labeled array objects are arrays first. Additional functionality (such as `align` or `pivot`) are defined if they make sense for the format. Some array API functionality is also extended, such as indexing with an expression (that will filter the labels) or reshaping along label dimensions instead of giving an explicit shape.
 
 To support all kinds of backend libraries, the protocol is limited to only those functionalities that make sense in every paradigm. Particularly, all arrays are immutable, with the expectation that for high performance code an accelerator library is used. In addition, because the degree of "laziness" may vary between implementations, this cannot easily be made explicit in the protocol. Instead you should expect computations to be resolved as soon as the array values are converted to an eager form, for example when you call `array.values()`.
 
