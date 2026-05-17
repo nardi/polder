@@ -35,15 +35,13 @@ def test_integer_indexing_reduces_dimensionality_2d(value_array_type):
     return a 1D array with the second axis preserved.
     """
     # Create (5, 3) array
-    values = np.array(
-        [
-            [1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [7.0, 8.0, 9.0],
-            [10.0, 11.0, 12.0],
-            [13.0, 14.0, 15.0],
-        ]
-    )
+    values = np.array([
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [7.0, 8.0, 9.0],
+        [10.0, 11.0, 12.0],
+        [13.0, 14.0, 15.0],
+    ])
     labels = [pl.DataFrame({"x": [0, 1, 2, 3, 4]}), pl.DataFrame({"y": [10, 20, 30]})]
     array = pld.from_values_and_labels(values, labels)
 
@@ -97,13 +95,11 @@ def test_mapping_indexing_reduces_dimensionality(value_array_type):
     that dimension should be removed from the result.
     """
     # Create (3, 4) array
-    values = np.array(
-        [
-            [1.0, 2.0, 3.0, 4.0],
-            [5.0, 6.0, 7.0, 8.0],
-            [9.0, 10.0, 11.0, 12.0],
-        ]
-    )
+    values = np.array([
+        [1.0, 2.0, 3.0, 4.0],
+        [5.0, 6.0, 7.0, 8.0],
+        [9.0, 10.0, 11.0, 12.0],
+    ])
     labels = [
         pl.DataFrame({"x": ["a", "b", "c"]}),
         pl.DataFrame({"y": [10, 20, 30, 40]}),
@@ -144,20 +140,16 @@ def test_mapping_indexing_preserves_other_dimensions(value_array_type):
 def test_mapping_indexing_multiple_columns_partial(value_array_type):
     """Test that mapping indexing with multiple columns filters based on available columns."""
     # Create array with multi-column labels
-    values = np.array(
-        [
-            [1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [7.0, 8.0, 9.0],
-        ]
-    )
+    values = np.array([
+        [1.0, 2.0, 3.0],
+        [4.0, 5.0, 6.0],
+        [7.0, 8.0, 9.0],
+    ])
     labels = [
-        pl.DataFrame(
-            {
-                "letter": ["a", "b", "c"],
-                "number": [1, 2, 3],
-            }
-        ),
+        pl.DataFrame({
+            "letter": ["a", "b", "c"],
+            "number": [1, 2, 3],
+        }),
         pl.DataFrame({"y": [10, 20, 30]}),
     ]
     array = pld.from_values_and_labels(values, labels)

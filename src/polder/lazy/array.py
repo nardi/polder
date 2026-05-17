@@ -106,7 +106,8 @@ class LazyFrameLabeledArray(
             frame.select(nw.exclude(value_column)).with_row_index("__index").lazy(),
         )
         values = (
-            frame.select(value_column)
+            frame
+            .select(value_column)
             .rename({value_column: "value"})
             .with_row_index("__index0")
             .lazy()
@@ -119,7 +120,8 @@ class LazyFrameLabeledArray(
         value_index = _create_index_df(self.shape(), self._frame_ns)
         index_columns = value_index.columns
         indexed_values = (
-            value_index.lazy()
+            value_index
+            .lazy()
             .join(self._values, on=index_columns, how="left")
             .sort(index_columns)
             .collect()
@@ -164,7 +166,8 @@ class LazyFrameLabeledArray(
             # deduced by the type checker, so we do a cast.
             return cast(
                 nw.DataFrame[ExternalFrameType],
-                axis_labels.sort("__index")
+                axis_labels
+                .sort("__index")
                 .drop("__index")
                 .collect(backend=self._frame_ns),
             )

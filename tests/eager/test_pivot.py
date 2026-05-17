@@ -17,13 +17,11 @@ def test_pivot_single_group(value_array_type):
         np.arange(8 * 3).reshape(8, 3).astype(float), value_array_type
     )
     labels = [
-        pl.DataFrame(
-            {
-                "x": [0, 0, 0, 0, 1, 1, 1, 1],
-                "y": [0, 0, 1, 1, 0, 0, 1, 1],
-                "t": [0, 1, 0, 1, 0, 1, 0, 1],
-            }
-        ),
+        pl.DataFrame({
+            "x": [0, 0, 0, 0, 1, 1, 1, 1],
+            "y": [0, 0, 1, 1, 0, 0, 1, 1],
+            "t": [0, 1, 0, 1, 0, 1, 0, 1],
+        }),
         pl.DataFrame({"extra": [0, 1, 2]}),
     ]
     arr = pld.from_values_and_labels(values, labels)
@@ -68,14 +66,12 @@ def test_pivot_multiple_groups(value_array_type):
         np.arange(16 * 2).reshape(16, 2).astype(float), value_array_type
     )
     labels = [
-        pl.DataFrame(
-            {
-                "x": [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
-                "y": [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
-                "t": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
-                "s": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-            }
-        ),
+        pl.DataFrame({
+            "x": [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+            "y": [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1],
+            "t": [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1],
+            "s": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+        }),
         pl.DataFrame({"extra": [0, 1]}),
     ]
     arr = pld.from_values_and_labels(values, labels)
@@ -113,13 +109,11 @@ def test_pivot_with_fill_value(value_array_type):
         np.arange(4 * 2, dtype=float).reshape((4, 2)), value_array_type
     )
     labels = [
-        pl.DataFrame(
-            {
-                "x": [0, 0, 1, 1],
-                "y": [0, 1, 0, 1],
-                "t": [0, 0, 1, 1],
-            }
-        ),
+        pl.DataFrame({
+            "x": [0, 0, 1, 1],
+            "y": [0, 1, 0, 1],
+            "t": [0, 0, 1, 1],
+        }),
         pl.DataFrame({"extra": [0, 1]}),
     ]
     arr = pld.from_values_and_labels(values, labels)
@@ -158,13 +152,11 @@ def test_unpivot_single_axis(value_array_type):
         np.arange(8 * 3).reshape(8, 3).astype(float), value_array_type
     )
     labels = [
-        pl.DataFrame(
-            {
-                "x": [0, 0, 0, 0, 1, 1, 1, 1],
-                "y": [0, 0, 1, 1, 0, 0, 1, 1],
-                "t": [0, 1, 0, 1, 0, 1, 0, 1],
-            }
-        ),
+        pl.DataFrame({
+            "x": [0, 0, 0, 0, 1, 1, 1, 1],
+            "y": [0, 0, 1, 1, 0, 0, 1, 1],
+            "t": [0, 1, 0, 1, 0, 1, 0, 1],
+        }),
         pl.DataFrame({"extra": [0, 1, 2]}),
     ]
     arr = pld.from_values_and_labels(values, labels)
@@ -310,13 +302,11 @@ def test_unpivot_three_axes_merge(value_array_type):
 def test_pivot_with_jax_jit():
     values = jnp.arange(8 * 3).reshape(8, 3).astype(float)
     labels = [
-        pl.DataFrame(
-            {
-                "x": [0, 0, 0, 0, 1, 1, 1, 1],
-                "y": [0, 0, 1, 1, 0, 0, 1, 1],
-                "t": [0, 1, 0, 1, 0, 1, 0, 1],
-            }
-        ),
+        pl.DataFrame({
+            "x": [0, 0, 0, 0, 1, 1, 1, 1],
+            "y": [0, 0, 1, 1, 0, 0, 1, 1],
+            "t": [0, 1, 0, 1, 0, 1, 0, 1],
+        }),
         pl.DataFrame({"extra": [0, 1, 2]}),
     ]
     arr = pld.from_values_and_labels(values, labels)

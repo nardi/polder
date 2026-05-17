@@ -141,7 +141,8 @@ def _pivot_single_group(
     # Build a cross join to get all (keep, pivot) combinations, then join with original data to find
     # the row indices.
     all_combinations = (
-        keep_labels.with_row_index("__keep_idx")
+        keep_labels
+        .with_row_index("__keep_idx")
         .lazy()
         .join(pivot_labels.with_row_index("__pivot_idx").lazy(), how="cross")
     )
@@ -248,7 +249,8 @@ def unpivot(
                     how="cross",
                 )
             merged_axis_labels = (
-                merged_axis_labels.sort(row_index_columns)
+                merged_axis_labels
+                .sort(row_index_columns)
                 .drop(row_index_columns)
                 .collect()
             )

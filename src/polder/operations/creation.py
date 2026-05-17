@@ -74,6 +74,7 @@ try:
         *,
         implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
     ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], jax.Array]: ...
+
 except ImportError:
     pass
 

@@ -14,7 +14,8 @@ def narwhals_df_equals(l1: nwt.DataFrameT, l2: nwt.DataFrameT) -> bool:
     # extra rows.
     assert "__index" not in l1.columns
     return len(l1) == (
-        l1.with_row_index("__index")
+        l1
+        .with_row_index("__index")
         .lazy()
         .join(
             l2.with_row_index("__index").lazy(), on=[*l1.columns, "__index"], how="full"
