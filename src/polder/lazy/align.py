@@ -9,25 +9,29 @@ import narwhals.typing as nwt
 from polder.utils.orderedset import orderedset
 
 if TYPE_CHECKING:
-    from polder.lazy.array import SomeLazyFrameLabeledArray
+    from polder.lazy.array import (
+        ExternalFrameType,
+        InternalFrameType,
+        LazyFrameLabeledArray,
+    )
 
 
 AxisNumbers: TypeAlias = tuple[int, ...]
 """A set of axes to align over the provided arrays."""
 
 
-class AlignmentResults(Generic[nwt.LazyFrameT], NamedTuple):
-    labels: tuple[nwt.LazyFrameT, ...]
+class AlignmentResults(Generic[nwt.FrameT], NamedTuple):
+    labels: tuple[nwt.FrameT, ...]
     """Contains the labels for each axis after alignment."""
-    value_index_mappings: tuple[nwt.LazyFrameT | None, ...]
+    value_index_mappings: tuple[nwt.FrameT | None, ...]
     """Contains a two-column frame (`__old_index` and `__index`) that shows how
     the values should be reordered for each axis. `None` means no reordering is
     necessary."""
 
 
 def _align_labels(
-    label_frames: Sequence[nwt.LazyFrameT],
-) -> AlignmentResults[nwt.LazyFrameT]:
+    label_frames: Sequence[nwt.FrameT],
+) -> AlignmentResults[nwt.FrameT]:
     # If there is only one frame, nothing to do.
     if len(label_frames) == 1:
         return AlignmentResults(tuple(label_frames[:1]), (None,))
@@ -51,8 +55,8 @@ def _align_labels(
         return AlignmentResults(tuple(label_frames), (None,) * len(label_frames))
 
     # The set of aligned labels is given by the first frame.
-    labels = [label_frames[0].select("__index", *label_columns)]
-    value_index_mappings: list[nwt.LazyFrameT | None] = [None]
+    labels: list[nwt.FrameT] = [label_frames[0].select("__index", *label_columns)]
+    value_index_mappings: list[nwt.FrameT | None] = [None]
     # Then, each subsequent frame can deduce an index mapping by joining onto
     # this frame.
     reference_labels = labels[0]
@@ -67,10 +71,10 @@ def _align_labels(
 
 
 def align(
-    *arrays: SomeLazyFrameLabeledArray,
+    *arrays: LazyFrameLabeledArray[ExternalFrameType, InternalFrameType],
     axes: Iterable[AxisNumbers] | None = None,
     check_only: bool = False,
-) -> tuple[SomeLazyFrameLabeledArray, ...]:
+) -> tuple[LazyFrameLabeledArray[ExternalFrameType, InternalFrameType], ...]:
     """Alignment for lazy arrays. Note that for lazy arrays, there is no way to
     check the alignment other than to attempt it and observe it failing when
     executed, so `check_only` has no effect and alignment is always
@@ -102,7 +106,7 @@ def align(
     # Align every set of axes one-by-one.
     for axis in axes:
         # Collect alignable label frames.
-        alignable_label_frames: list[nw.LazyFrame] = []
+        alignable_label_frames: list[InternalFrameType] = []
         # Contains (array_idx, axis_idx) for each alignable label frame.
         alignable_label_frame_positions: list[tuple[int, int]] = []
 
@@ -136,12 +140,17 @@ def align(
                 all_labels[array_idx][axis_idx] = aligned_labels_for_axis
 
                 if value_idx_mapping is not None:
+                    values = all_values[array_idx]
                     value_idx_col = f"__index{axis_idx}"
                     all_values[array_idx] = (
-                        all_values[array_idx]
+                        values
                         .rename({value_idx_col: "__old_index"})
                         .join(
-                            value_idx_mapping.rename({"__index": value_idx_col}),
+                            # For some reason, the type checker cannot deduce
+                            # that both these frames are of the same type,
+                            # though `reveal_type` shows
+                            # `InternalFrameType@align` for both. What gives?
+                            value_idx_mapping.rename({"__index": value_idx_col}),  # type: ignore
                             on="__old_index",
                             how="left",
                         )

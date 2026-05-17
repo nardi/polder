@@ -27,7 +27,7 @@ def from_values_and_labels(
     labels: Iterable[pl.DataFrame | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.LAZY],
-) -> LazyFrameLabeledArray[pl.DataFrame, pl.LazyFrame]: ...
+) -> LazyFrameLabeledArray[nw.DataFrame[pl.DataFrame], nw.LazyFrame[pl.LazyFrame]]: ...
 
 
 @overload
@@ -36,7 +36,7 @@ def from_values_and_labels(
     labels: Iterable[IntoDataFrameT | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.LAZY],
-) -> LazyFrameLabeledArray[IntoDataFrameT, Any]: ...
+) -> LazyFrameLabeledArray[nw.DataFrame[IntoDataFrameT], Any]: ...
 
 
 @overload
@@ -108,7 +108,7 @@ def from_frame(
     *,
     value_column: str = "value",
     implementation: Literal[FrameLabeledArrayImplementation.LAZY] = ...,
-) -> LazyFrameLabeledArray[pl.DataFrame, pl.LazyFrame]: ...
+) -> LazyFrameLabeledArray[nw.DataFrame[pl.DataFrame], nw.LazyFrame[pl.LazyFrame]]: ...
 
 
 @overload
@@ -117,7 +117,7 @@ def from_frame(
     *,
     value_column: str = "value",
     implementation: Literal[FrameLabeledArrayImplementation.LAZY] = ...,
-) -> LazyFrameLabeledArray[IntoDataFrameT, Any]: ...
+) -> LazyFrameLabeledArray[nw.DataFrame[IntoDataFrameT], Any]: ...
 
 
 def from_frame(

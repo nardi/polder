@@ -7,15 +7,15 @@ from types import ModuleType
 from typing import Any, Generic, Self, TypeAlias, TypeVar, cast, overload
 
 import narwhals as nw
-import narwhals.typing as nwt
 import numpy as np
 
+from polder.config import use_eager_evaluation_for_lazy_arrays
 from polder.protocols.array import AnyArray, ArrayAxisIndices, FrameLabeledArray
 from polder.utils.indexer import indexermethod
 
-AnyExternalFrame: TypeAlias = nwt.IntoDataFrame
+AnyExternalFrame: TypeAlias = nw.DataFrame[Any]
 ExternalFrameType = TypeVar("ExternalFrameType", bound=AnyExternalFrame)
-AnyInternalFrame: TypeAlias = nwt.IntoLazyFrame
+AnyInternalFrame: TypeAlias = nw.LazyFrame[Any] | nw.DataFrame[Any]
 InternalFrameType = TypeVar("InternalFrameType", bound=AnyInternalFrame)
 
 
@@ -32,19 +32,19 @@ def _create_index_df(shape: Sequence[int], frame_ns: ModuleType):
 @dataclass(frozen=True, eq=False, slots=True)
 class LazyFrameLabeledArray(
     Generic[ExternalFrameType, InternalFrameType],
-    FrameLabeledArray[nw.DataFrame[ExternalFrameType], np.ndarray],
+    FrameLabeledArray[ExternalFrameType, np.ndarray],
 ):
     """A variant of FrameLabeledArray that stores all data (labels and values)
     in a table (long) format, and resolves into an array lazily."""
 
-    _indexed_labels: tuple[nw.LazyFrame[InternalFrameType] | None, ...]
+    _indexed_labels: tuple[InternalFrameType | None, ...]
     """The labels for each axis in the array. These contain an additional column
     `__index` which specifies the ordering."""
-    _values: nw.LazyFrame[InternalFrameType]
+    _values: InternalFrameType
     """The values for the array. These are stored in long format, with an
     index-column for each axis named `__index0`, `__index1`, etc. and a single
     `value` column."""
-    _shape: nw.LazyFrame[InternalFrameType]
+    _shape: InternalFrameType
     """The shape of the array. Because the values are lazily computed, this is a
     separate computation that guarantees the validity of the array. This is a
     table with two columns, `axis` and `size`."""
@@ -55,8 +55,8 @@ class LazyFrameLabeledArray(
 
     @staticmethod
     def from_values_and_labels(
-        values: AnyArray, labels: Sequence[nw.DataFrame[nwt.IntoDataFrameT] | None]
-    ) -> LazyFrameLabeledArray[nwt.IntoDataFrameT, AnyInternalFrame]:
+        values: AnyArray, labels: Sequence[ExternalFrameType | None]
+    ) -> LazyFrameLabeledArray[ExternalFrameType, AnyInternalFrame]:
         frame_ns = next(
             (df.implementation for df in labels if df is not None),
             nw.Implementation.POLARS,
@@ -66,20 +66,29 @@ class LazyFrameLabeledArray(
 
         n_dims = len(values.shape)
 
-        shape_frame = nw.from_numpy(
-            np.stack([np.arange(n_dims), np.array(values.shape)], axis=1),
-            schema=["axis", "size"],
-            backend=frame_ns,
-        ).lazy()
+        use_lazy_frames = not use_eager_evaluation_for_lazy_arrays()
 
-        values_frame = (
-            _create_index_df(values.shape, frame_ns)
-            .with_columns(value=values.reshape((-1,)))
-            .lazy()
+        def maybe_lazy(frame: AnyExternalFrame) -> AnyInternalFrame:
+            if use_lazy_frames:
+                return frame.lazy()
+            return frame
+
+        shape_frame = maybe_lazy(
+            nw.from_numpy(
+                np.stack([np.arange(n_dims), np.array(values.shape)], axis=1),
+                schema=["axis", "size"],
+                backend=frame_ns,
+            )
+        )
+
+        values_frame = maybe_lazy(
+            _create_index_df(values.shape, frame_ns).with_columns(
+                value=values.reshape((-1,))
+            )
         )
 
         indexed_labels = tuple(
-            axis_labels.with_row_index("__index").lazy()
+            maybe_lazy(axis_labels.with_row_index("__index"))
             if axis_labels is not None
             else None
             for axis_labels in labels
@@ -91,26 +100,34 @@ class LazyFrameLabeledArray(
 
     @staticmethod
     def from_frame(
-        frame: nw.DataFrame[nwt.IntoDataFrameT], *, value_column: str = "value"
-    ) -> LazyFrameLabeledArray[nwt.IntoDataFrameT, AnyInternalFrame]:
+        frame: ExternalFrameType, *, value_column: str = "value"
+    ) -> LazyFrameLabeledArray[ExternalFrameType, AnyInternalFrame]:
         frame_ns = frame.implementation.to_native_namespace()
+
+        use_lazy_frames = not use_eager_evaluation_for_lazy_arrays()
+
+        def maybe_lazy(frame: AnyExternalFrame) -> AnyInternalFrame:
+            if use_lazy_frames:
+                return frame.lazy()
+            return frame
 
         # An array created from a frame will always be 1-dimensional.
         n_dims = 1
-        shape = nw.from_dict(
-            {"axis": [0], "size": [len(frame)]}, backend=frame_ns
-        ).lazy()
+        shape = maybe_lazy(
+            nw.from_dict({"axis": [0], "size": [len(frame)]}, backend=frame_ns)
+        )
 
         # Split the frame into labels and values, addding an index to each.
         labels = (
-            frame.select(nw.exclude(value_column)).with_row_index("__index").lazy(),
+            maybe_lazy(
+                frame.select(nw.exclude(value_column)).with_row_index("__index")
+            ),
         )
-        values = (
+        values = maybe_lazy(
             frame
             .select(value_column)
             .rename({value_column: "value"})
             .with_row_index("__index0")
-            .lazy()
         )
 
         return LazyFrameLabeledArray(labels, values, shape, n_dims, frame_ns)
@@ -122,7 +139,7 @@ class LazyFrameLabeledArray(
         indexed_values = (
             value_index
             .lazy()
-            .join(self._values, on=index_columns, how="left")
+            .join(self._values.lazy(), on=index_columns, how="left")
             .sort(index_columns)
             .collect()
         )
@@ -140,33 +157,30 @@ class LazyFrameLabeledArray(
         return values
 
     @overload
-    def labels(self, axis: int) -> nw.DataFrame[ExternalFrameType] | None: ...
+    def labels(self, axis: int) -> ExternalFrameType | None: ...
 
     @overload
     def labels(
         self, axis: slice | None = ...
-    ) -> Sequence[nw.DataFrame[ExternalFrameType] | None]: ...
+    ) -> Sequence[ExternalFrameType | None]: ...
 
     def labels(
         self, axis: int | slice | None = None
-    ) -> (
-        nw.DataFrame[ExternalFrameType]
-        | None
-        | Sequence[nw.DataFrame[ExternalFrameType] | None]
-    ):
+    ) -> ExternalFrameType | None | Sequence[ExternalFrameType | None]:
         if axis is None:
             axis = slice(None)
 
         selected_labels = self._indexed_labels[axis]
 
         def collect_labels(
-            axis_labels: nw.LazyFrame,
-        ) -> nw.DataFrame[ExternalFrameType]:
+            axis_labels: AnyInternalFrame,
+        ) -> ExternalFrameType:
             # We ensure we have the right DataFrame type, but this cannot be
             # deduced by the type checker, so we do a cast.
             return cast(
-                nw.DataFrame[ExternalFrameType],
+                ExternalFrameType,
                 axis_labels
+                .lazy()
                 .sort("__index")
                 .drop("__index")
                 .collect(backend=self._frame_ns),
@@ -177,7 +191,7 @@ class LazyFrameLabeledArray(
                 collect_labels(axis_labels) if axis_labels is not None else None
                 for axis_labels in selected_labels
             )
-        elif isinstance(selected_labels, nw.LazyFrame):
+        elif isinstance(selected_labels, (nw.DataFrame, nw.LazyFrame)):
             return collect_labels(selected_labels)
 
         return None
@@ -193,7 +207,11 @@ class LazyFrameLabeledArray(
             backend=self._frame_ns,
         )
         shape = (
-            axes.lazy().join(self._shape, on="axis", how="left").sort("axis").collect()
+            axes
+            .lazy()
+            .join(self._shape.lazy(), on="axis", how="left")
+            .sort("axis")
+            .collect()
         )
 
         is_valid_shape = (

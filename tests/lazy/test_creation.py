@@ -233,3 +233,30 @@ def test_nan_values():
         np.isnan(result) | (result == values),
         np.ones_like(result, dtype=bool),
     )
+
+
+def test_array_creation_with_eager_evaluation():
+    """Test creating a lazy array with the
+    `use_eager_evaluation_for_lazy_arrays` setting enabled."""
+    values = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    labels = [
+        pl.DataFrame({"x": [0, 1]}),
+        pl.DataFrame({"y": [0, 1, 2]}),
+    ]
+
+    array = pld.from_values_and_labels(values, labels, implementation=LAZY)
+
+    # By default, the setting is off and all internal frames are LazyFrames.
+    assert all(isinstance(labels, nw.LazyFrame) for labels in array._indexed_labels)
+    assert isinstance(array._values, nw.LazyFrame)
+    assert isinstance(array._shape, nw.LazyFrame)
+
+    with pld.config.use_eager_evaluation_for_lazy_arrays(True):
+        array2 = pld.from_values_and_labels(values, labels, implementation=LAZY)
+
+        # With the setting enabled, they are DataFrames instead.
+        assert all(
+            isinstance(labels, nw.DataFrame) for labels in array2._indexed_labels
+        )
+        assert isinstance(array2._values, nw.DataFrame)
+        assert isinstance(array2._shape, nw.DataFrame)
