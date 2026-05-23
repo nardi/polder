@@ -5,8 +5,38 @@ import polars as pl
 import pytest
 
 import polder as pld
+from polder.eager.labels import Labels
+from polder.protocols.implementations import (
+    EAGER,
+    LAZY,
+)
 
-from ..utils import cast_value_array
+from ..utils import ValueArrayType, cast_value_array
+
+# Operations that are not implemented for lazy arrays because they require
+# math functions not available as Narwhals expressions.
+_LAZY_UNSUPPORTED = {
+    pld.acos,
+    pld.acosh,
+    pld.asin,
+    pld.asinh,
+    pld.atan,
+    pld.atanh,
+    pld.cosh,
+    pld.isinf,
+    pld.log1p,
+    pld.sign,
+    pld.sinh,
+    pld.tan,
+    pld.tanh,
+    pld.trunc,
+}
+
+
+@pytest.fixture(params=[EAGER, LAZY])
+def implementation(request):
+    """Parametrized fixture for testing both eager and lazy implementations."""
+    return request.param
 
 
 @pytest.mark.parametrize(
@@ -50,29 +80,46 @@ from ..utils import cast_value_array
         (pld.logical_not, np.logical_not, np.array([[True, False], [False, True]])),
     ],
 )
-def test_unary_elementwise_functions(func, numpy_func, test_values, value_array_type):
+def test_unary_elementwise_functions(
+    func, numpy_func, test_values, value_array_type, implementation
+):
     """Test unary elementwise functions against numpy equivalents."""
     # Cast to appropriate dtype for bitwise operations.
     if func is pld.bitwise_invert:
         test_values = test_values.astype(np.int32)
+
+    # Lazy arrays do not support JAX inputs.
+    if implementation == LAZY and value_array_type == ValueArrayType.JAX:
+        pytest.skip("Lazy arrays do not support JAX value arrays.")
+
+    # Some functions have no Narwhals Expr equivalent and are not supported for lazy.
+    if implementation == LAZY and func in _LAZY_UNSUPPORTED:
+        pytest.skip(f"{func.__name__} is not implemented for lazy arrays.")
 
     labels = [
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
     ]
     arr = pld.from_values_and_labels(
-        cast_value_array(test_values, value_array_type), labels
+        cast_value_array(test_values, value_array_type),
+        labels,
+        implementation=implementation,
     )
 
     result = func(arr)
-    assert isinstance(result.values(), value_array_type.value)
+
+    # Lazy arrays always return numpy; eager returns the input value array type.
+    if implementation == EAGER:
+        assert isinstance(result.values(), value_array_type.value)
+    else:
+        assert isinstance(result.values(), np.ndarray)
 
     # Compare to numpy.
     expected_values = numpy_func(test_values)
     np.testing.assert_array_almost_equal(result.values(), expected_values)
 
     # Labels should be preserved.
-    assert result.labels() == arr.labels()
+    assert Labels(result.labels()) == Labels(arr.labels())
 
 
 @pytest.mark.parametrize(
@@ -83,8 +130,9 @@ def test_unary_elementwise_functions(func, numpy_func, test_values, value_array_
         (pld.conj, np.conj),
     ],
 )
-def test_unary_complex_functions(func, numpy_func, value_array_type):
-    """Test complex-valued unary functions."""
+@pytest.mark.parametrize("implementation", [EAGER], indirect=True)
+def test_unary_complex_functions(func, numpy_func, value_array_type, implementation):
+    """Test complex-valued unary functions (eager only; lazy does not support complex)."""
     test_values = np.array([[1 + 2j, 3 - 4j], [5 + 0j, 0 - 6j]])
     labels = [
         pl.DataFrame({"x": [0, 1]}),
@@ -100,7 +148,7 @@ def test_unary_complex_functions(func, numpy_func, value_array_type):
     expected_values = numpy_func(test_values)
     np.testing.assert_array_equal(result.values(), expected_values)
 
-    assert result.labels() == arr.labels()
+    assert Labels(result.labels()) == Labels(arr.labels())
 
 
 @pytest.mark.parametrize(
@@ -112,21 +160,38 @@ def test_unary_complex_functions(func, numpy_func, value_array_type):
         (pld.signbit, np.signbit),
     ],
 )
-def test_unary_classification_functions(func, numpy_func, value_array_type):
+def test_unary_classification_functions(
+    func, numpy_func, value_array_type, implementation
+):
     """Test classification functions that return boolean or int."""
     test_values = np.array([[np.inf, -np.inf], [np.nan, 1.0]])
     labels = [
         pl.DataFrame({"x": [0, 1]}),
         pl.DataFrame({"y": [0, 1]}),
     ]
+
+    # Lazy arrays do not support JAX inputs.
+    if implementation == LAZY and value_array_type == ValueArrayType.JAX:
+        pytest.skip("Lazy arrays do not support JAX value arrays.")
+
+    # Some functions have no Narwhals Expr equivalent and are not supported for lazy.
+    if implementation == LAZY and func in _LAZY_UNSUPPORTED:
+        pytest.skip(f"{func.__name__} is not implemented for lazy arrays.")
+
     arr = pld.from_values_and_labels(
-        cast_value_array(test_values, value_array_type), labels
+        cast_value_array(test_values, value_array_type),
+        labels,
+        implementation=implementation,
     )
 
     result = func(arr)
-    assert isinstance(result.values(), value_array_type.value)
+
+    if implementation == EAGER:
+        assert isinstance(result.values(), value_array_type.value)
+    else:
+        assert isinstance(result.values(), np.ndarray)
 
     expected_values = numpy_func(test_values)
     np.testing.assert_array_equal(result.values(), expected_values)
 
-    assert result.labels() == arr.labels()
+    assert Labels(result.labels()) == Labels(arr.labels())

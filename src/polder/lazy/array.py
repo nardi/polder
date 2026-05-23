@@ -10,6 +10,7 @@ import narwhals as nw
 import numpy as np
 
 import polder.lazy.binary as binary
+import polder.lazy.unary as unary
 from polder.config import use_eager_evaluation_for_lazy_arrays
 from polder.protocols.array import AnyArray, ArrayAxisIndices, FrameLabeledArray
 from polder.utils.indexer import indexermethod
@@ -76,6 +77,11 @@ class LazyFrameLabeledArray(
         ).to_native_namespace()
 
         values = np.asarray(values)
+
+        if np.iscomplexobj(values):
+            raise NotImplementedError(
+                "Lazy arrays do not support complex-valued arrays."
+            )
 
         n_dims = len(values.shape)
 
@@ -242,6 +248,9 @@ class LazyFrameLabeledArray(
         )
 
     # Arithmetic operators
+    __abs__ = unary.abs_
+    __pos__ = unary.pos
+    __neg__ = unary.neg
     __add__ = binary.add
     __radd__ = binary.add
     __sub__ = binary.sub
@@ -258,6 +267,7 @@ class LazyFrameLabeledArray(
     __rpow__ = swap_args(binary.pow)
 
     # Bitwise operators
+    __invert__ = unary.invert
     __and__ = binary.and_
     __rand__ = binary.and_
     __or__ = binary.or_
@@ -305,19 +315,7 @@ class LazyFrameLabeledArray(
     def unpivot(self, /, *, axes_to_merge: Sequence[tuple[int, int]]) -> Self:
         raise NotImplementedError
 
-    def __abs__(self) -> Self:
-        raise NotImplementedError
-
-    def __pos__(self) -> Self:
-        raise NotImplementedError
-
-    def __neg__(self) -> Self:
-        raise NotImplementedError
-
     def __matmul__(self, other: Self) -> Self:
-        raise NotImplementedError
-
-    def __invert__(self) -> Self:
         raise NotImplementedError
 
 
