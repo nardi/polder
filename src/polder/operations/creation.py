@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     import polars as pl
 
 from polder.eager.array import EagerFrameLabeledArray
-from polder.eager.value_array import SomeValueArray
+from polder.eager.value_array import JaxArray, NumpyArray, SomeValueArray
 from polder.lazy.array import LazyFrameLabeledArray
 from polder.protocols.array import AnyArray, FrameLabeledArray
 from polder.protocols.implementations import (
@@ -48,16 +48,13 @@ def from_values_and_labels(
 ) -> EagerFrameLabeledArray[nw.DataFrame[IntoDataFrameT], SomeValueArray]: ...
 
 
-# We add an overload for np.ndarray specifically because the concrete class
-# doesn't validate against Array from `types-array-api`. This way we can do a
-# typecast here and let both library and user code be typed correctly.
 @overload
 def from_values_and_labels(
     values: np.ndarray,
     labels: Iterable[IntoDataFrameT | None],
     *,
     implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
-) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], np.ndarray]: ...
+) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], NumpyArray]: ...
 
 
 # JAX is an optional dependency, so we guard the import with a try-catch block.
@@ -73,7 +70,7 @@ try:
         labels: Iterable[IntoDataFrameT | None],
         *,
         implementation: Literal[FrameLabeledArrayImplementation.EAGER] = ...,
-    ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], jax.Array]: ...
+    ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], JaxArray]: ...
 
 except ImportError:
     pass
@@ -91,12 +88,8 @@ def from_values_and_labels(
     )
     match implementation:
         case FrameLabeledArrayImplementation.EAGER:
-            if isinstance(values, np.ndarray):
-                # np.ndarray doesn't type as Array for some reason.
-                return EagerFrameLabeledArray.from_values_and_labels(values, label_dfs)  # type: ignore
-            if maybe_jax is not None and isinstance(values, maybe_jax.Array):
-                # jax.Array also doesn't type as Array.
-                return EagerFrameLabeledArray.from_values_and_labels(values, label_dfs)  # type: ignore
+            if isinstance(values, (NumpyArray, JaxArray)):
+                return EagerFrameLabeledArray.from_values_and_labels(values, label_dfs)
         case FrameLabeledArrayImplementation.LAZY:
             return LazyFrameLabeledArray.from_values_and_labels(values, label_dfs)
     raise NotImplementedError()

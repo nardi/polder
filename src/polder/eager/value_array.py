@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeAlias, TypeVar
 
+import numpy as np
 from array_api_compat import array_namespace
 from typing_extensions import TypeAliasType
 
@@ -73,3 +74,32 @@ def array_equal(
     elements_eq = xp.where(nan_mask, True, elements_eq)
 
     return bool(xp.all(elements_eq))
+
+
+# Unfortunately, the np.ndarray does not type check against the Array protocol.
+# However, we know it is fine. Therefore we "trick" the type checker here that
+# there is a subclass which does implement the Array protocol.
+if TYPE_CHECKING:
+
+    class NumpyArray(np.ndarray, Array):
+        pass
+
+else:
+    NumpyArray = np.ndarray
+
+# Same thing for JAX, if installed.
+if TYPE_CHECKING:
+    import jax
+
+    class JaxArray(jax.Array, Array):  # type: ignore
+        pass
+
+else:
+    try:
+        import jax
+
+        JaxArray = jax.Array
+    except ImportError:
+
+        class JaxArray:
+            pass
