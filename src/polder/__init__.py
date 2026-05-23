@@ -1,6 +1,7 @@
 from polder import config
 from polder.eager.array import EagerFrameLabeledArray
 from polder.lazy.array import LazyFrameLabeledArray
+from polder.operations.conversion import convert
 from polder.operations.creation import from_frame, from_values_and_labels
 from polder.operations.unary import (
     abs_,
@@ -59,6 +60,8 @@ __all__ = [
     # Creation operations
     "from_frame",
     "from_values_and_labels",
+    # Conversion operations
+    "convert",
     # Unary operations
     "pos",
     "neg",

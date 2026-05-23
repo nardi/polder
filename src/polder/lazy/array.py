@@ -225,6 +225,22 @@ class LazyFrameLabeledArray(
 
         return tuple(shape["size"])
 
+    def collect(self) -> Self:
+        """Collect all LazyFrames backing this lazy array, resolving any lazy
+        computations, and store the results in a new lazy array."""
+
+        collect_frame = lambda frame: cast(
+            InternalFrameType, self.maybe_lazy(frame.lazy().collect())
+        )
+
+        return type(self)(
+            tuple(map(collect_frame, self._indexed_labels)),
+            collect_frame(self._values),
+            collect_frame(self._shape),
+            self._n_dims,
+            self._frame_ns,
+        )
+
     # Arithmetic operators
     __add__ = binary.add
     __radd__ = binary.add
