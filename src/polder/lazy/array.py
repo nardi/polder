@@ -9,6 +9,7 @@ from typing import Any, Generic, Self, TypeAlias, TypeVar, cast, overload
 import narwhals as nw
 import numpy as np
 
+import polder.lazy.binary as binary
 from polder.config import use_eager_evaluation_for_lazy_arrays
 from polder.protocols.array import AnyArray, ArrayAxisIndices, FrameLabeledArray
 from polder.utils.indexer import indexermethod
@@ -27,6 +28,10 @@ def _create_index_df(shape: Sequence[int], frame_ns: ModuleType):
         schema=[f"__index{i}" for i in range(n_dims)],
         backend=frame_ns,
     )
+
+
+def swap_args(f):
+    return lambda a, b: f(b, a)
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -54,8 +59,16 @@ class LazyFrameLabeledArray(
     """The native namespace used to construct Narwhals DataFrames."""
 
     @staticmethod
+    def maybe_lazy(frame: AnyExternalFrame) -> AnyInternalFrame:
+        use_lazy_frames = not use_eager_evaluation_for_lazy_arrays()
+
+        if use_lazy_frames:
+            return frame.lazy()
+        return frame
+
+    @classmethod
     def from_values_and_labels(
-        values: AnyArray, labels: Sequence[ExternalFrameType | None]
+        cls, values: AnyArray, labels: Sequence[ExternalFrameType | None]
     ) -> LazyFrameLabeledArray[ExternalFrameType, AnyInternalFrame]:
         frame_ns = next(
             (df.implementation for df in labels if df is not None),
@@ -66,14 +79,7 @@ class LazyFrameLabeledArray(
 
         n_dims = len(values.shape)
 
-        use_lazy_frames = not use_eager_evaluation_for_lazy_arrays()
-
-        def maybe_lazy(frame: AnyExternalFrame) -> AnyInternalFrame:
-            if use_lazy_frames:
-                return frame.lazy()
-            return frame
-
-        shape_frame = maybe_lazy(
+        shape_frame = cls.maybe_lazy(
             nw.from_numpy(
                 np.stack([np.arange(n_dims), np.array(values.shape)], axis=1),
                 schema=["axis", "size"],
@@ -81,14 +87,14 @@ class LazyFrameLabeledArray(
             )
         )
 
-        values_frame = maybe_lazy(
+        values_frame = cls.maybe_lazy(
             _create_index_df(values.shape, frame_ns).with_columns(
                 value=values.reshape((-1,))
             )
         )
 
         indexed_labels = tuple(
-            maybe_lazy(axis_labels.with_row_index("__index"))
+            cls.maybe_lazy(axis_labels.with_row_index("__index"))
             if axis_labels is not None
             else None
             for axis_labels in labels
@@ -98,32 +104,25 @@ class LazyFrameLabeledArray(
             indexed_labels, values_frame, shape_frame, n_dims, frame_ns
         )
 
-    @staticmethod
+    @classmethod
     def from_frame(
-        frame: ExternalFrameType, *, value_column: str = "value"
+        cls, frame: ExternalFrameType, *, value_column: str = "value"
     ) -> LazyFrameLabeledArray[ExternalFrameType, AnyInternalFrame]:
         frame_ns = frame.implementation.to_native_namespace()
 
-        use_lazy_frames = not use_eager_evaluation_for_lazy_arrays()
-
-        def maybe_lazy(frame: AnyExternalFrame) -> AnyInternalFrame:
-            if use_lazy_frames:
-                return frame.lazy()
-            return frame
-
         # An array created from a frame will always be 1-dimensional.
         n_dims = 1
-        shape = maybe_lazy(
+        shape = cls.maybe_lazy(
             nw.from_dict({"axis": [0], "size": [len(frame)]}, backend=frame_ns)
         )
 
         # Split the frame into labels and values, addding an index to each.
         labels = (
-            maybe_lazy(
+            cls.maybe_lazy(
                 frame.select(nw.exclude(value_column)).with_row_index("__index")
             ),
         )
-        values = maybe_lazy(
+        values = cls.maybe_lazy(
             frame
             .select(value_column)
             .rename({value_column: "value"})
@@ -226,6 +225,45 @@ class LazyFrameLabeledArray(
 
         return tuple(shape["size"])
 
+    # Arithmetic operators
+    __add__ = binary.add
+    __radd__ = binary.add
+    __sub__ = binary.sub
+    __rsub__ = swap_args(binary.sub)
+    __mul__ = binary.mul
+    __rmul__ = binary.mul
+    __truediv__ = binary.truediv
+    __rtruediv__ = swap_args(binary.truediv)
+    __floordiv__ = binary.floordiv
+    __rfloordiv__ = swap_args(binary.floordiv)
+    __mod__ = binary.mod
+    __rmod__ = swap_args(binary.mod)
+    __pow__ = binary.pow
+    __rpow__ = swap_args(binary.pow)
+
+    # Bitwise operators
+    __and__ = binary.and_
+    __rand__ = binary.and_
+    __or__ = binary.or_
+    __ror__ = binary.or_
+    __xor__ = binary.xor
+    __rxor__ = binary.xor
+    __lshift__ = binary.lshift
+    __rlshift__ = swap_args(binary.lshift)
+    __rshift__ = binary.rshift
+    __rrshift__ = swap_args(binary.rshift)
+
+    # Comparison operators
+    __lt__ = binary.lt
+    __le__ = binary.le
+    __gt__ = binary.gt
+    __ge__ = binary.ge
+    # Apparently __eq__ is supposed to return boolean, does Numpy break this rule too?
+    __eq__ = binary.eq  # type: ignore
+    __ne__ = binary.ne  # type: ignore
+
+    ## Unimplemented protocol members ##
+
     def __getitem__(
         self,
         indices: int
@@ -260,104 +298,14 @@ class LazyFrameLabeledArray(
     def __neg__(self) -> Self:
         raise NotImplementedError
 
-    def __add__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __radd__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __sub__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rsub__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __mul__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rmul__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __truediv__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rtruediv__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __floordiv__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rfloordiv__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __mod__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rmod__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __pow__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rpow__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
     def __matmul__(self, other: Self) -> Self:
         raise NotImplementedError
 
     def __invert__(self) -> Self:
         raise NotImplementedError
 
-    def __and__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
 
-    def __rand__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __or__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __ror__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __xor__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rxor__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __lshift__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rlshift__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rshift__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __rrshift__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __lt__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __le__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __gt__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __ge__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __eq__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-    def __ne__(self, other: Self | int | float | complex | bool) -> Self:
-        raise NotImplementedError
-
-
-AnyLazyFrameLabeledArray = LazyFrameLabeledArray[AnyExternalFrame, AnyInternalFrame]
+AnyLazyFrameLabeledArray = LazyFrameLabeledArray[Any, Any]
 SomeLazyFrameLabeledArray = TypeVar(
     "SomeLazyFrameLabeledArray", bound=AnyLazyFrameLabeledArray
 )
