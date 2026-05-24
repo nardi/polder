@@ -1,6 +1,6 @@
 [project]
 name = "polder"
-version = "0.0.2"
+version = "0.0.3"
 description = "Arrays with DataFrame axis labels"
 readme = "README.md"
 authors = [{ name = "Nardi Lam", email = "mail@nardilam.nl" }]
