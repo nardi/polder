@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
 from types import ModuleType
@@ -12,6 +12,7 @@ import numpy as np
 import polder.lazy.binary as binary
 import polder.lazy.unary as unary
 from polder.config import use_eager_evaluation_for_lazy_arrays
+from polder.lazy.pivot import pivot, unpivot
 from polder.protocols.array import AnyArray, ArrayAxisIndices, FrameLabeledArray
 from polder.utils.indexer import indexermethod
 
@@ -23,7 +24,7 @@ InternalFrameType = TypeVar("InternalFrameType", bound=AnyInternalFrame)
 
 def _create_index_df(shape: Sequence[int], frame_ns: ModuleType):
     n_dims = len(shape)
-    indices = np.indices(shape).reshape((n_dims), -1).T
+    indices = np.indices(shape, dtype=np.uint32).reshape((n_dims), -1).T
     return nw.from_numpy(
         indices,
         schema=[f"__index{i}" for i in range(n_dims)],
@@ -149,9 +150,7 @@ class LazyFrameLabeledArray(
             .collect()
         )
 
-        if indexed_values.select(
-            nw.any_horizontal(nw.col("value").is_null().any(), ignore_nulls=True)
-        ).item():
+        if indexed_values.select(nw.col("value").is_null().any()).item():
             raise ValueError("Array has indices for which no value is stored")
 
         values = indexed_values["value"].to_numpy().reshape(self.shape())
@@ -247,6 +246,9 @@ class LazyFrameLabeledArray(
             self._frame_ns,
         )
 
+    pivot = pivot
+    unpivot = unpivot
+
     # Arithmetic operators
     __abs__ = unary.abs_
     __pos__ = unary.pos
@@ -301,18 +303,6 @@ class LazyFrameLabeledArray(
         raise NotImplementedError
 
     def equals(self, other: Self) -> bool:
-        raise NotImplementedError
-
-    def pivot(
-        self,
-        /,
-        *,
-        axis_labels_to_pivot: Mapping[int, Sequence[str] | Sequence[Sequence[str]]],
-        fill_value: Any = ...,
-    ) -> Self:
-        raise NotImplementedError
-
-    def unpivot(self, /, *, axes_to_merge: Sequence[tuple[int, int]]) -> Self:
         raise NotImplementedError
 
     def __matmul__(self, other: Self) -> Self:
