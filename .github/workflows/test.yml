@@ -1,0 +1,39 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch or pull request.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The project supports Python 3.11 and up (see requires-python).
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+
+      # Sync the project and its dev group, which holds pytest, the backends
+      # (polars, jax) and pytest-markdown-docs used to run the doc examples.
+      - name: Install dependencies
+        run: uv sync
+
+      # pytest also runs the docs code blocks, per the addopts in pyproject.toml.
+      - name: Run tests
+        run: uv run pytest
