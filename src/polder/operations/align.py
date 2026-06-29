@@ -28,8 +28,11 @@ def align(
 
     Args:
         axes: Optional specification of axes to align. If None, aligns all axes.
-        check_only: If True, only check if the arrays are aligned, and if so return them. Will not
-        modify anything.
+        check_only: If True, only check whether the arrays are aligned, and if so return
+            them unchanged. When True, nothing is reordered.
+
+    Returns:
+        The input arrays, reordered so that their labels are aligned along every axis.
     """
     if all(isinstance(arr, EagerFrameLabeledArray) for arr in arrays):
         eager_arrays = cast(tuple[EagerFrameLabeledArray, ...], arrays)

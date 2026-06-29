@@ -27,6 +27,18 @@ def swap_args(f):
 
 @dataclass(frozen=True, eq=False, slots=True)
 class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
+    """The array-backed implementation of the protocol, resolving every operation
+    immediately.
+
+    The values are held in a real array following the array API, with tested support for
+    NumPy and JAX, and the labels are held as Narwhals DataFrames. This implementation
+    supports the full protocol. It is immutable, so every operation returns a new array,
+    and it is registered as a JAX pytree so it can be traced and differentiated.
+
+    Prefer the `from_values_and_labels` function in the top-level package over constructing
+    this class directly.
+    """
+
     _labels: Labels[LabelFrameType]
     _values: SomeValueArray
 
@@ -34,6 +46,7 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
     def from_values_and_labels(
         cls, values: SomeValueArray, labels: Sequence[LabelFrameType | None]
     ) -> Self:
+        """Construct an eager array from a value array and one label frame per axis."""
         return cls(Labels(labels), values)
 
     def __post_init__(self):
@@ -62,15 +75,25 @@ class EagerFrameLabeledArray(FrameLabeledArray[LabelFrameType, SomeValueArray]):
     def labels(
         self, axis: int | slice | None = None
     ) -> LabelFrameType | None | tuple[LabelFrameType | None, ...]:
+        """Return the label frame for a single axis, or all axes.
+
+        With an integer axis, the frame for that axis is returned, or None if the axis is
+        unlabeled. With a slice or None, a tuple with one frame (or None) per axis is
+        returned."""
         if axis is None:
             axis = slice(None)
         return self._labels[axis]
 
     @indexermethod
     def values(self, *indices: ArrayAxisIndices[SomeValueArray]) -> SomeValueArray:
+        """Return the underlying value array, optionally indexed.
+
+        Called with no arguments it returns the whole array. It can also be subscripted,
+        as in `array.values[0]`, to index the values directly and possibly avoid a copy."""
         return self._values[indices or ...]
 
     def shape(self) -> tuple[int, ...]:
+        """The shape of the array, as a tuple with one size per axis."""
         # The validity of the shape is checked during __post_init__.
         return cast(tuple[int, ...], self._values.shape)
 

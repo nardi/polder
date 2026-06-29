@@ -82,6 +82,25 @@ def from_values_and_labels(
     *,
     implementation: FrameLabeledArrayImplementation = EAGER,
 ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], Any]:
+    """Create a frame-labeled array from a value array and a label frame per axis.
+
+    There is one label frame per axis, so the number of frames must equal the number of
+    dimensions of `values`, and the number of rows of each frame must match the size of
+    the corresponding axis. A frame may have more than one column, which attaches several
+    labels to the same axis. An axis of size 1 may be left unlabeled by passing None for
+    its frame, which marks it as broadcastable.
+
+    Args:
+        values: The values to label. Any array following the array API is accepted by the
+            eager implementation. The lazy implementation converts the values to NumPy.
+        labels: One label frame (or None) per axis, in axis order. Each frame is anything
+            Narwhals can wrap, such as a Polars DataFrame.
+        implementation: The implementation to build. Defaults to EAGER.
+
+    Returns:
+        A frame-labeled array of the requested implementation, wrapping the given values
+        and labels.
+    """
     label_dfs = tuple(
         nw.from_native(axis_labels) if axis_labels is not None else None
         for axis_labels in labels
@@ -119,6 +138,25 @@ def from_frame(
     value_column: str = "value",
     implementation: FrameLabeledArrayImplementation = LAZY,
 ) -> FrameLabeledArray[nw.DataFrame[IntoDataFrameT], np.ndarray]:
+    """Create a one-dimensional frame-labeled array from a single frame in long format.
+
+    One column of the frame holds the values, and the remaining columns become the labels
+    of the single axis. The resulting array is always one-dimensional. To obtain a
+    higher-dimensional array, use `from_values_and_labels` or reshape with `pivot`.
+
+    Args:
+        frame: A Narwhals DataFrame in long format, with one row per array element.
+        value_column: The name of the column holding the values. Defaults to "value".
+        implementation: The implementation to build. Defaults to LAZY, since keeping the
+            data in its DataFrame backend is the typical reason to start from a frame. The
+            EAGER implementation is not yet supported by this function.
+
+    Returns:
+        A one-dimensional frame-labeled array of the requested implementation.
+
+    Raises:
+        NotImplementedError: If the EAGER implementation is requested.
+    """
     lazy_array = LazyFrameLabeledArray.from_frame(frame, value_column=value_column)
 
     match implementation:

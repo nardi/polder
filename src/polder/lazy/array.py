@@ -72,6 +72,12 @@ class LazyFrameLabeledArray(
     def from_values_and_labels(
         cls, values: AnyArray, labels: Sequence[ExternalFrameType | None]
     ) -> LazyFrameLabeledArray[ExternalFrameType, AnyInternalFrame]:
+        """Construct a lazy array from a value array and one label frame per axis.
+
+        The values are converted to NumPy and stored in long format, with one row per
+        element. Complex-valued arrays are not supported. Prefer the
+        `from_values_and_labels` function in the top-level package, passing
+        `implementation=LAZY`, over constructing this class directly."""
         frame_ns = next(
             (df.implementation for df in labels if df is not None),
             nw.Implementation.POLARS,
@@ -115,6 +121,11 @@ class LazyFrameLabeledArray(
     def from_frame(
         cls, frame: ExternalFrameType, *, value_column: str = "value"
     ) -> LazyFrameLabeledArray[ExternalFrameType, AnyInternalFrame]:
+        """Construct a one-dimensional lazy array from a single frame in long format.
+
+        The `value_column` holds the values and the remaining columns become the labels of
+        the single axis. Prefer the `from_frame` function in the top-level package over
+        constructing this class directly."""
         frame_ns = frame.implementation.to_native_namespace()
 
         # An array created from a frame will always be 1-dimensional.
@@ -140,6 +151,11 @@ class LazyFrameLabeledArray(
 
     @indexermethod
     def values(self, *indices: ArrayAxisIndices) -> np.ndarray:
+        """Resolve the lazy computation and return the values as a NumPy array.
+
+        The backing frames are collected and reshaped into an array of the array's shape,
+        regardless of the underlying DataFrame backend. This is where pending lazy work is
+        actually performed."""
         value_index = _create_index_df(self.shape(), self._frame_ns)
         index_columns = value_index.columns
         indexed_values = (
@@ -171,6 +187,10 @@ class LazyFrameLabeledArray(
     def labels(
         self, axis: int | slice | None = None
     ) -> ExternalFrameType | None | Sequence[ExternalFrameType | None]:
+        """Return the label frame for a single axis, or all axes.
+
+        The internal ordering column is dropped and the frames are collected into the
+        external DataFrame backend before being returned."""
         if axis is None:
             axis = slice(None)
 
@@ -201,6 +221,10 @@ class LazyFrameLabeledArray(
         return None
 
     def shape(self) -> Sequence[int]:
+        """The shape of the array, as a tuple with one size per axis.
+
+        Resolving the shape forces the separate shape computation, which also validates
+        that the array is well formed."""
         return self._evaluated_shape
 
     @cached_property

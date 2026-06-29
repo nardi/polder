@@ -34,7 +34,9 @@ def use_eager_evaluation_for_lazy_arrays(
 ) -> _GeneratorContextManager[None, None, None]: ...
 
 
-def auto_align(enable: bool | None = None):
+def auto_align(
+    enable: bool | None = None,
+) -> bool | _GeneratorContextManager[None, None, None]:
     """When performing operations with eager arrays, alignment is performed
     automatically if this setting is true.
 
@@ -43,13 +45,13 @@ def auto_align(enable: bool | None = None):
     setting has the provided value.
 
     Args:
-        enable: Optional. Whether to enable or disable automatic alignment of arrays in binary operations.
-                When False, alignment is only checked but not performed.
-                If None (default), returns the current value instead.
+        enable: Whether to enable or disable automatic alignment of arrays in binary
+            operations. When False, alignment is only checked but not performed. When
+            None (the default), the current value is returned instead.
 
     Returns:
-        If enable is None: bool - the current auto_align setting
-        If enable is bool: context manager during which the setting is changed.
+        The current setting as a bool when enable is None, otherwise a context manager
+        during which the setting has the provided value.
 
     Example:
         ```python
@@ -79,7 +81,9 @@ def auto_align(enable: bool | None = None):
         return _context_manager()
 
 
-def use_eager_evaluation_for_lazy_arrays(enable: bool | None = None):
+def use_eager_evaluation_for_lazy_arrays(
+    enable: bool | None = None,
+) -> bool | _GeneratorContextManager[None, None, None]:
     """Use DataFrames instead of LazyFrames for lazy arrays. This can be useful for
     testing purposes, because errors will surface more quickly and closer to where
     they originate.
@@ -93,12 +97,12 @@ def use_eager_evaluation_for_lazy_arrays(enable: bool | None = None):
     setting has the provided value.
 
     Args:
-        enable: Optional. Whether to enable eager evaluation for lazy arrays.
-                If None (default), returns the current value instead.
+        enable: Whether to enable eager evaluation for lazy arrays. When None (the
+            default), the current value is returned instead.
 
     Returns:
-        If enable is None: bool - the current setting value
-        If enable is bool: context manager during which the setting is changed.
+        The current setting as a bool when enable is None, otherwise a context manager
+        during which the setting has the provided value.
 
     Example:
         ```python
