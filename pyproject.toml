@@ -21,7 +21,17 @@ requires = ["uv_build>=0.11.2,<0.12"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["polars>=1.39.3", "pytest>=9.0.2", "jax>=0.10.0"]
+docs = [
+    "zensical>=0.0.46",
+    "mkdocstrings-python>=2.0.5",
+]
+dev = [
+    "polars>=1.39.3",
+    "pytest>=9.0.2",
+    "jax>=0.10.0",
+    "pytest-markdown-docs>=0.9.2",
+    { include-group = "docs" },
+]
 
 [tool.ruff.format]
 preview = true
@@ -30,5 +40,12 @@ preview = true
 select = ["E4", "E7", "E9", "F", "I"]
 ignore = ["E731"]
 
-[tool.pytest]
-addopts = ["--import-mode=importlib"]
+[tool.pytest.ini_options]
+# The docs pages are executable: every Python code block is run as a test by
+# pytest-markdown-docs, so the examples stay reproducible.
+addopts = [
+    "--import-mode=importlib",
+    "--markdown-docs",
+    "--markdown-docs-syntax=superfences",
+]
+testpaths = ["tests", "docs"]

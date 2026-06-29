@@ -1,0 +1,137 @@
+# Configuration for the polder documentation site.
+#
+# This file is read by Zensical (https://zensical.org). To work on the docs
+# locally, run `zensical serve` and open the printed URL. To produce a static
+# build, run `zensical build`.
+
+[project]
+
+site_name = "polder"
+site_description = "Arrays with DataFrame axis labels."
+site_author = "Nardi Lam"
+
+# The canonical URL of the published site, used for links and the sitemap.
+site_url = "https://nardi.github.io/polder/"
+
+repo_url = "https://github.com/nardi/polder"
+repo_name = "nardi/polder"
+
+copyright = """
+Copyright &copy; 2026 Nardi Lam
+"""
+
+# The navigation is defined explicitly so that the conceptual order of the user
+# guide is preserved. If you add a page, remember to list it here.
+nav = [
+  { "Home" = "index.md" },
+  { "User guide" = [
+    { "Eager arrays" = "guide/eager-arrays.md" },
+    { "Lazy arrays" = "guide/lazy-arrays.md" },
+    { "Converting between implementations" = "guide/conversion.md" },
+    { "Writing generic code" = "guide/generic-protocol.md" },
+    { "Indexing" = "guide/indexing.md" },
+    { "Alignment" = "guide/alignment.md" },
+    { "Pivoting" = "guide/pivoting.md" },
+    { "Mathematical operations" = "guide/math-operations.md" },
+  ] },
+  { "API reference" = [
+    { "Overview" = "api/index.md" },
+    { "Creation" = "api/creation.md" },
+    { "Conversion" = "api/conversion.md" },
+    { "The protocol" = "api/protocol.md" },
+    { "Eager implementation" = "api/eager.md" },
+    { "Lazy implementation" = "api/lazy.md" },
+    { "Operations" = "api/operations.md" },
+    { "Configuration" = "api/config.md" },
+  ] },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "announce.dismiss",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.code.select",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+[[project.theme.palette]]
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/nardi/polder"
+
+# The mkdocstrings plugin renders the API reference directly from the source
+# code and its docstrings. The Python handler reads the package from the "src"
+# directory. See https://zensical.org/docs/setup/extensions/mkdocstrings/.
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+inventories = ["https://docs.python.org/3/objects.inv"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+show_source = false
+show_root_heading = true
+show_root_full_path = false
+members_order = "source"
+separate_signature = true
+show_signature_annotations = true
+signature_crossrefs = true
+
+# The Markdown extensions below enable the formatting used throughout the docs,
+# such as admonitions, tabbed code blocks, and math rendering.
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+[project.markdown_extensions.pymdownx.betterem]
+[project.markdown_extensions.pymdownx.caret]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.emoji]
+emoji_generator = "zensical.extensions.emoji.to_svg"
+emoji_index = "zensical.extensions.emoji.twemoji"
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.magiclink]
+[project.markdown_extensions.pymdownx.mark]
+[project.markdown_extensions.pymdownx.smartsymbols]
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+combine_header_slug = true
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+[project.markdown_extensions.pymdownx.tilde]

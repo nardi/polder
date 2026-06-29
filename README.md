@@ -4,6 +4,8 @@
   <code>polder</code> - Finding the middle-ground between array and relational data models
   </h2>
 
+  
+
 </div>
 
 ## Introduction
@@ -14,6 +16,14 @@
 2. whose entries are labeled using Polars-compatible ([Narwhals](https://narwhals-dev.github.io/narwhals/)) DataFrames.
 
 In other words, it lets you bundle your *data* and your *metadata* into a single container, using an array-based library to handle the data, and a relational library to handle the metadata.
+
+Install with pip:
+
+```bash
+pip install polder
+```
+
+and [read the documentation here](https://nardi.github.io/polder).
 
 ### Why?
 
