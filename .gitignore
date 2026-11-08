@@ -13,3 +13,4 @@ wheels/
 
 # Docs site
 site/
+.cache/
