@@ -99,7 +99,7 @@ proposed rule per function category.
 | Reduction        | `sum`, `prod`, `mean`, `min`, `max`, `std`, `var`, `all`, `any`, `count_nonzero` | The reduced axis is removed. With `keepdims=True`, it becomes an unlabeled axis of size 1. |
 | Index reduction  | `argmin`, `argmax`                                                               | As a reduction. The values are integer positions.                                          |
 | Cumulative       | `cumulative_sum`, `cumulative_prod`                                              | Unchanged. `include_initial=True` adds an entry without a label, so it is not supported.   |
-| Axis order       | `permute_dims`, `moveaxis`, `matrix_transpose`                                   | The label frames are permuted with the axes.                                               |
+| Axis order       | `permute_dims`, `moveaxis`, `matrix_transpose`, `T`                              | The label frames are permuted with the axes.                                               |
 | Order in an axis | `flip`, `roll`, `take`                                                           | The label frame is reordered with the values.                                              |
 | Size-1 axes      | `expand_dims`, `squeeze`                                                         | An unlabeled axis is added or removed. `squeeze` of a labeled axis is an error.            |
 | Combination      | `concat`                                                                         | The label frames of the axis are concatenated. All other axes are aligned.                 |
@@ -189,8 +189,9 @@ NumPy function on the bare values, for NumPy and JAX arrays.
 
 ### Stage 2: accessors and conversions
 
-1. Add `dtype()`, `ndim()`, `size()` and `device()` as methods, like `shape()`.
-   Transposition is only available as the `matrix_transpose` function.
+1. Add `dtype()`, `ndim()`, `size()` and `device()` as methods, like `shape()`. Add `T`
+   as a property that reverses the axes of an array with two dimensions. It does not
+   start a computation in either implementation, so it is not a method.
 1. Add `astype`, `to_device`, and the scalar conversions.
 1. Add `zeros_like`, `ones_like`, `full_like` and `empty_like`.
 
