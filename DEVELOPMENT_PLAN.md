@@ -429,10 +429,13 @@ def labels_are_equal(left, right) -> bool:
         return True
     if left.columns != right.columns or len(left) != len(right):
         return False
-    return all(
-        ((left[c] == right[c]) | (left[c].is_null() & right[c].is_null())).all()
-        for c in left.columns
-    )
+    for column in left.columns:
+        x, y = left[column], right[column]
+        # A comparison with null returns null, so null counts as not equal.
+        same = ((x == y) | (x.is_null() & y.is_null())).fill_null(False)
+        if not same.all():
+            return False
+    return True
 ```
 
 `_align_labels` calls `labels_are_equal` for each frame against the first frame. When
@@ -616,8 +619,8 @@ equal and does not reorder, which corrects D11.
 
 **Zero-dimensional arrays.** The value frame has one row and no index column, and the
 shape frame has no rows. `_create_index_df` returns a frame with one row and a
-placeholder column in that case, because a frame without columns has no rows. This
-corrects D13 and is necessary for `axis=None` in the reductions.
+placeholder column in that case, because a Polars frame without columns has no rows.
+This corrects D13 and is necessary for `axis=None` in the reductions.
 
 **Data types.** After each operation, the `value` column is cast to the data type that
 the eager implementation returns. See [Data types](#data-types). A scalar operand is
@@ -630,9 +633,9 @@ available, because a comparison of lazy frames needs a collect.
 
 **Lazy engine.** `from_values_and_labels`, `from_frame` and `convert` get an argument
 `lazy_backend`. The frames are created with the backend of the label frames and then
-converted with `frame.lazy(backend=lazy_backend)`. This corrects D16. `labels()` and
-`values()` already collect with `collect(backend=self._frame_ns)`, so the user gets
-frames of the original type.
+converted with `frame.lazy(backend=lazy_backend)`. This corrects D16. `labels()` already
+collects with `collect(backend=self._frame_ns)`, so the user gets label frames of the
+original type.
 
 **Values index.** `values[...]` filters the value frame on the selected index positions
 before the collect. The dense index frame is then created for the selected shape only.
@@ -690,8 +693,7 @@ functions follow one of four patterns, and each pattern gets one generator funct
 
 The second pattern has no cost that depends on the number of entries. `permute_dims` is
 one `rename` on the value frame, a permutation of the label tuple, and a new `axis`
-column in the shape frame. This is an advantage over the eager implementation, where JAX
-copies the values.
+column in the shape frame.
 
 `concat` adds an offset to the index column of each array after the first. The offset is
 the sum of the sizes of the earlier arrays, which comes from their shape frames with a
