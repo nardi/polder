@@ -11,15 +11,15 @@ Statements about current behavior were checked against commit `2195794` with Nar
 
 ## Goals from the README
 
-| Id  | Goal                                                                                                                                     |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| G1  | The `FrameLabeledArray` protocol follows the array API and adds label operations such as `align` and `pivot`.                            |
-| G2  | The eager implementation accepts each array that follows the array API. NumPy and JAX have tests and types.                              |
-| G3  | The lazy implementation supports the full protocol and keeps all work in the DataFrame backend.                                          |
-| G4  | An operation has the same cost profile as the backend operation. Automatic alignment is the only exception, and the user can disable it. |
-| G5  | The user can convert an array between the implementations.                                                                               |
-| G6  | A third implementation holds eager values and applies index operations lazily.                                                           |
-| G7  | All library code is typed, and backend libraries other than `narwhals` and `numpy` are imported dynamically.                             |
+| Id  | Goal                                                                                                                                                           |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | The `FrameLabeledArray` protocol mirrors the array API and adds label operations such as `align` and `pivot`. It is not a conforming array API implementation. |
+| G2  | The eager implementation accepts each array that follows the array API. NumPy and JAX have tests and types.                                                    |
+| G3  | The lazy implementation supports the full protocol and keeps all work in the DataFrame backend.                                                                |
+| G4  | An operation has the same cost profile as the backend operation. Automatic alignment is the only exception, and the user can disable it.                       |
+| G5  | The user can convert an array between the implementations.                                                                                                     |
+| G6  | A third implementation holds eager values and applies index operations lazily.                                                                                 |
+| G7  | All library code is typed, and backend libraries other than `narwhals` and `numpy` are imported dynamically.                                                   |
 
 ## Current state
 
@@ -35,7 +35,7 @@ Statements about current behavior were checked against commit `2195794` with Nar
 | Operators for arithmetic, bitwise logic and comparison | Yes                 | Yes                                |
 | `__matmul__`                                           | Two dimensions only | No                                 |
 | Unary functions                                        | 39                  | 22                                 |
-| All other array API functions and attributes           | No                  | No                                 |
+| All other array API functions and accessors            | No                  | No                                 |
 
 The following defects were found in the existing code.
 
@@ -64,12 +64,27 @@ The following defects were found in the existing code.
 These decisions apply to both implementations, so they come before the implementation
 work.
 
+### Array API relation
+
+polder mirrors the array API and does not conform to it. A function keeps the name, the
+arguments and the value semantics of the array API function when a label rule exists for
+it. The protocol deviates in three places.
+
+1. A property of the array that can start a computation is a method, as `shape()` is. In
+   the lazy implementation, such a call can collect a frame.
+1. A function has extra arguments when the labels of the result need them.
+1. A function without a label rule is left out. See
+   [Functions without labels](#functions-without-labels).
+
+As a consequence, `polder` is not an array namespace, and `__array_namespace__` is not
+planned.
+
 ### Operation dispatch
 
 The functions in `polder.operations` select an implementation with `isinstance` chains.
 A registry per operation, for example with `functools.singledispatch`, lets a new
 implementation register its own function without a change in `polder.operations`. The
-protocol then only contains the special methods, the attributes, and the label
+protocol then only contains the special methods, the accessor methods, and the label
 operations. All other array API functions are free functions in the `polder` namespace,
 as in the array API itself.
 
@@ -84,7 +99,7 @@ proposed rule per function category.
 | Reduction        | `sum`, `prod`, `mean`, `min`, `max`, `std`, `var`, `all`, `any`, `count_nonzero` | The reduced axis is removed. With `keepdims=True`, it becomes an unlabeled axis of size 1. |
 | Index reduction  | `argmin`, `argmax`                                                               | As a reduction. The values are integer positions.                                          |
 | Cumulative       | `cumulative_sum`, `cumulative_prod`                                              | Unchanged. `include_initial=True` adds an entry without a label, so it is not supported.   |
-| Axis order       | `permute_dims`, `moveaxis`, `matrix_transpose`, `T`, `mT`                        | The label frames are permuted with the axes.                                               |
+| Axis order       | `permute_dims`, `moveaxis`, `matrix_transpose`                                   | The label frames are permuted with the axes.                                               |
 | Order in an axis | `flip`, `roll`, `take`                                                           | The label frame is reordered with the values.                                              |
 | Size-1 axes      | `expand_dims`, `squeeze`                                                         | An unlabeled axis is added or removed. `squeeze` of a labeled axis is an error.            |
 | Combination      | `concat`                                                                         | The label frames of the axis are concatenated. All other axes are aligned.                 |
@@ -172,13 +187,12 @@ NumPy function on the bare values, for NumPy and JAX arrays.
    namespace of the values.
 1. Change the dispatch in `polder.operations` to a registry.
 
-### Stage 2: attributes and conversions
+### Stage 2: accessors and conversions
 
-1. Add `dtype`, `ndim`, `size`, `device`, `T` and `mT`.
+1. Add `dtype()`, `ndim()`, `size()` and `device()` as methods, like `shape()`.
+   Transposition is only available as the `matrix_transpose` function.
 1. Add `astype`, `to_device`, and the scalar conversions.
 1. Add `zeros_like`, `ones_like`, `full_like` and `empty_like`.
-1. Decide if `shape` stays a method. The array API defines it as an attribute, and a
-   later change breaks user code.
 
 ### Stage 3: elementwise functions
 
@@ -222,14 +236,6 @@ NumPy function on the bare values, for NumPy and JAX arrays.
 1. Leave the `linalg` and `fft` extensions of the array API out. `map_values` covers the
    functions that keep the shape.
 
-### Stage 8: array namespace
-
-When stages 2 to 7 are complete, add `__array_namespace__` so that `polder` is the array
-namespace of its arrays. The documentation must list each deviation from the array API,
-which are the functions in [Functions without labels](#functions-without-labels) and the
-extra arguments for labels. The `array-api-tests` suite cannot run without changes,
-because it creates arrays without labels.
-
 ## Lazy implementation
 
 Each function has one shared test in `tests/operations` that runs on both
@@ -237,19 +243,19 @@ implementations. The test converts the lazy result with `convert` and compares i
 eager result with `equals`, so the eager implementation is the reference. The tests run
 with `use_eager_evaluation_for_lazy_arrays` on and off.
 
-### Stage 9: internal structure
+### Stage 8: internal structure
 
 1. Add the deferred checks from [Deferred validation](#deferred-validation), and use
    them for defects 7 and 8.
 1. Support zero-dimensional arrays, which is defect 9. The value frame then has one row
    and no index column.
 1. Add `dtype` from `collect_schema`, and cast the result of each operation to the data
-   type that the array API prescribes. See [Data types](#data-types).
+   type that the eager implementation returns. See [Data types](#data-types).
 1. Skip the joins in `align` when the label frames of both arrays are the same objects.
    This is the common case after an elementwise operation on one array.
 1. Apply the index of `values[...]` as a filter before `collect`.
 
-### Stage 10: protocol parity
+### Stage 9: protocol parity
 
 1. Add `__getitem__`. See [Index operations](#index-operations).
 1. Add `equals`. It returns a `bool`, so it must collect, as `values` does.
@@ -257,7 +263,7 @@ with `use_eager_evaluation_for_lazy_arrays` on and off.
    `group_by` and `sum`.
 1. Add the missing unary functions. See [Missing expressions](#missing-expressions).
 
-### Stage 11: function parity
+### Stage 10: function parity
 
 The stages 2 to 7 are repeated for the lazy implementation, in the same order. Most
 functions follow one of four patterns.
@@ -269,7 +275,7 @@ functions follow one of four patterns.
 | Aggregation             | Reductions, `matmul`, `tensordot`, `vecdot`                          | `group_by` on the index columns that stay, then an aggregation                                      |
 | Window                  | `cumulative_sum`, `cumulative_prod`, `diff`, `sort`, `argsort`       | An expression with `over` on the other index columns and `order_by` on the index column of the axis |
 
-### Stage 12: backends and the third implementation
+### Stage 11: backends and the third implementation
 
 1. Run the lazy tests on at least one more Narwhals backend with lazy frames, such as
    DuckDB. Only Polars is tested at this time.
@@ -362,8 +368,8 @@ preference.
 
 `log1p` and `expm1` are a special case. The derived forms `log(1 + x)` and `exp(x) - 1`
 lose accuracy for small values, so the existing lazy `expm1` does not have the accuracy
-that the array API function implies. They need solution 2. `nextafter` has no DataFrame
-equivalent and stays unsupported.
+of the eager `expm1`. They need solution 2. `nextafter` has no DataFrame equivalent and
+stays unsupported.
 
 A call to a Python function on the values inside the plan is not possible, as
 `map_batches` is not allowed on a lazy frame. `map_values` therefore has no lazy
@@ -371,8 +377,8 @@ implementation, and the documentation must refer to `convert`.
 
 ### Data types
 
-The array API prescribes the data type of each result, and the DataFrame backends follow
-other rules. The following differences were measured with Polars.
+The eager implementation returns the data type of its array backend, and the DataFrame
+backends follow other rules. The following differences were measured with Polars.
 
 | Expression            | NumPy | Polars through Narwhals |
 | --------------------- | ----- | ----------------------- |
@@ -383,8 +389,9 @@ Floor division and remainder of `-7` and `2`, and the overflow of `int8` additio
 the same results as NumPy. Other backends can differ, in particular SQL backends for
 integer division. The suggested solution has three parts.
 
-1. Compute the result data type with the array API promotion rules from the data types
-   in `collect_schema`, and cast the `value` column after each operation.
+1. Compute the result data type with the promotion rules of the array API, which the
+   eager backends follow, from the data types in `collect_schema`, and cast the `value`
+   column after each operation.
 1. Make NaN propagation explicit in `min`, `max`, `argmin` and `argmax`, with an
    `is_nan().any()` aggregation and `nw.when`.
 1. Keep null and NaN separate. A null in the `value` column always means that an entry
@@ -395,9 +402,9 @@ integer division. The suggested solution has three parts.
 
 A reduction is a `group_by` on the index columns that stay. Three cases need extra work.
 
-1. A reduction over an axis of size 0 returns no rows, while the array API prescribes
-   the identity value, such as 0 for `sum`. The plan needs a left join from the full
-   index of the result and a `fill_null` with the identity value.
+1. A reduction over an axis of size 0 returns no rows, while the eager implementation
+   returns the identity value, such as 0 for `sum`. The plan needs a left join from the
+   full index of the result and a `fill_null` with the identity value.
 1. `argmin` and `argmax` have no aggregation in Narwhals. The plan can filter the rows
    where the value equals the minimum over the lane, and then take the minimum index.
 1. `prod` has no aggregation in Narwhals. It needs the native expression table, because
@@ -410,7 +417,7 @@ values. A long chain of operations creates a deep plan, and a hash join on all i
 columns costs more than the same elementwise operation on an array. This conflicts with
 G4 for dense numeric code. Three measures limit the cost.
 
-1. Skip alignment for label frames that are the same objects, as in stage 9.
+1. Skip alignment for label frames that are the same objects, as in stage 8.
 1. Document `collect` as the method that ends the current plan and stores its result.
 1. State in the user guide that the lazy implementation fits relational work, and that
    `convert` to the eager implementation fits dense numeric loops.
@@ -426,12 +433,11 @@ documentation of each method must state that the call collects.
 
 `_create_index_df` and the creation functions build frames with `nw.from_numpy` in the
 native namespace of the label frames. This was only run with Polars. A backend that only
-has lazy frames, such as DuckDB or PySpark, can need another creation path, and stage 12
+has lazy frames, such as DuckDB or PySpark, can need another creation path, and stage 11
 must test this before the README can claim support for each Narwhals backend.
 
 ## Open questions
 
-1. Should `shape` become an attribute to match the array API?
 1. Should the reductions accept label columns in addition to an axis number, such as
    `sum(array, over={0: ["year"]})`? This is equal to a `pivot` followed by a reduction,
    and it avoids the dense intermediate array.
