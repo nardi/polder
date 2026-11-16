@@ -170,6 +170,17 @@ Copies of the values:
 The compiled program for the two JAX gathers in sequence contains two gather operations,
 so XLA does not combine them.
 
+Size of the XLA executable under `jax.jit` for a one-dimensional array with 100 000
+entries, with the position maps as NumPy arrays from the Python scope:
+
+| Case                                               | Serialized executable |
+| -------------------------------------------------- | --------------------- |
+| 4 gathers in sequence, one map each                | 1 142 kB              |
+| 1 gather with the 4 maps combined into one         | 289 kB                |
+| 4 gathers in sequence, maps passed as arguments    | 10 kB                 |
+| 2-D, 1000 by 1000, one gather per axis in sequence | 10.5 kB               |
+| 2-D, 1000 by 1000, one gather with `np.ix_`        | 10.6 kB               |
+
 Chain of `k` additions on a 300 by 300 array:
 
 | `k` | Eager  | Lazy   |
@@ -190,7 +201,8 @@ Five conclusions follow from these numbers.
    cost that can be measured. The join must be avoided, because it cannot be made faster
    from polder.
 5. A gather that combines two reorders is faster than two gathers in sequence, with
-   NumPy and with JAX under `jax.jit`. See
+   NumPy and with JAX under `jax.jit`. Under `jax.jit`, each position map is also stored
+   in the executable, so combined maps also make the executable smaller. See
    [Third implementation](#third-implementation).
 
 ## Design decisions
@@ -1031,7 +1043,16 @@ and one gather, instead of k gathers of all values. The gain depends on the shap
 2. For a 1000 by 1000 array with one reorder per axis, one gather took 4.8 ms with NumPy
    against 5.7 ms for two gathers. Under `jax.jit`, one gather took 0.6 ms against 1.8
    ms. See [Measurements](#measurements).
-3. The gain increases with the number of axes and the length of the chain. An index that
+3. Under `jax.jit`, the label frames are static, because `EagerFrameLabeledArray`
+   registers them as metadata of the pytree. The alignment and the position maps are
+   therefore computed during tracing, so the join runs one time per compilation and not
+   on each call. Each map is a NumPy array that XLA stores as a constant in the
+   executable. A chain of 4 reorders on one axis with 100 000 entries gave an executable
+   of 1 142 kB, and the combined map gave 289 kB. The size of the executable grows with
+   the number of maps, so combination keeps it small. The eager implementation inside a
+   traced function stores one map for each reorder. Maps for different axes cannot be
+   combined, so a gather with `np.ix_` has the same size as one gather per axis.
+4. The gain increases with the number of axes and the length of the chain. An index that
    selects a small part of a large array has the largest gain, because the full values
    are never copied.
 
