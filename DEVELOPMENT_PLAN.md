@@ -1215,31 +1215,24 @@ rechunks its `ChunkedArray` arguments and calls the function of the chunk namesp
 This fallback makes the namespace complete from the start. The rules in the table are
 added one at a time, in the order of their benefit.
 
-| Function                                                    | Rule                                                                            | Copies of the values       | Polars                                                       |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------ |
-| Slice or integer index on the chunk axis                    | Select the chunks, and slice the first and the last chunk                       | None                       | Same                                                         |
-| `concat` on the chunk axis                                  | Concatenate the chunk tuples                                                    | None                       | Same, with `rechunk=False`                                   |
-| `stack` on a new axis that becomes the chunk axis           | Each input becomes one chunk with `expand_dims`                                 | None                       | No equivalent                                                |
-| Index on another axis                                       | Index each chunk                                                                | As for the chunk namespace | No equivalent                                                |
-| Elementwise function of one array                           | Function per chunk                                                              | Output only                | Same                                                         |
-| Elementwise function of more arrays                         | Align the chunk layouts, then apply the function per piece                      | Output only                | Rechunks the left operand when both have more than one chunk |
-| Reduction over other axes                                   | Reduction per chunk                                                             | Output only                | No equivalent                                                |
-| Reduction over the chunk axis                               | Reduction per chunk, then a combination of the partial results                  | Partial results only       | Not checked                                                  |
-| `cumulative_sum`, `cumulative_prod` on the chunk axis       | Function per chunk, then add or multiply the last result of the previous chunks | Output only                | Not checked                                                  |
-| `diff` on the chunk axis                                    | Function per chunk, plus one difference at each boundary between two chunks     | Output only                | Not checked                                                  |
-| `take` or an integer array index on the chunk axis          | Gather from the chunks for few indices, else rechunk and gather                 | Output only, or one        | Gather from the chunks for numeric values                    |
-| `permute_dims`, `moveaxis`                                  | Function per chunk, and a new `chunk_axis`                                      | As for the chunk namespace | No equivalent                                                |
-| `reshape`, `sort`, `flip`, other reorders on the chunk axis | Rechunk, then the function of the chunk namespace                               | One                        | Rechunks for a sort of some data types                       |
+| Function                                                    | Rule                                                                                             | Copies of the values                   | Polars                                                       |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------ |
+| Slice or integer index on the chunk axis                    | Select the chunks, and slice the first and the last chunk                                        | None                                   | Same                                                         |
+| `concat` on the chunk axis                                  | Concatenate the chunk tuples                                                                     | None                                   | Same, with `rechunk=False`                                   |
+| `stack` on a new axis that becomes the chunk axis           | Each input becomes one chunk with `expand_dims`                                                  | None                                   | No equivalent                                                |
+| Index on another axis                                       | Index each chunk                                                                                 | As for the chunk namespace             | No equivalent                                                |
+| Elementwise function of one array                           | Function per chunk                                                                               | Output only                            | Same                                                         |
+| Elementwise function of more arrays                         | Align the chunk layouts to the operand with the fewest chunks, then apply the function per chunk | Output only, or one copy of an operand | Rechunks the left operand when both have more than one chunk |
+| Reduction over other axes                                   | Reduction per chunk                                                                              | Output only                            | No equivalent                                                |
+| Reduction over the chunk axis                               | Reduction per chunk, then a combination of the partial results                                   | Partial results only                   | Not checked                                                  |
+| `cumulative_sum`, `cumulative_prod` on the chunk axis       | Function per chunk, then add or multiply the last result of the previous chunks                  | Output only                            | Not checked                                                  |
+| `diff` on the chunk axis                                    | Function per chunk, plus one difference at each boundary between two chunks                      | Output only                            | Not checked                                                  |
+| `take` or an integer array index on the chunk axis          | Gather from the chunks for few indices, else rechunk and gather                                  | Output only, or one                    | Gather from the chunks for numeric values                    |
+| `permute_dims`, `moveaxis`                                  | Function per chunk, and a new `chunk_axis`                                                       | As for the chunk namespace             | No equivalent                                                |
+| `reshape`, `sort`, `flip`, other reorders on the chunk axis | Rechunk, then the function of the chunk namespace                                                | One                                    | Rechunks for a sort of some data types                       |
 
-The chunk layouts of an elementwise function are aligned with the rule of Polars, with
-one change. Equal layouts are used without a change, and an operand with one chunk is
-sliced at the boundaries of the other operand. For two different layouts with more than
-one chunk, the `ChunkedArray` slices both operands at the union of their boundaries,
-instead of a rechunk of the left operand. The slices are views, so nothing is copied.
-The result has at most `k1 + k2 - 1` chunks for operands with `k1` and `k2` chunks. The
-union of two layouts that come from the same sources does not grow further, so repeated
-operations do not increase the number of chunks. The test with boundaries at 100 000 and
-at 250 000 created 7 pieces in 1.1 ms, against 0.98 ms for the full arrays.
+The chunk layouts of an elementwise function are aligned as described in
+[Layout alignment](#layout-alignment).
 
 The gather from chunks follows the measurements below, with 1 000 000 values and a
 search on the chunk offsets with `np.searchsorted`.
@@ -1269,6 +1262,113 @@ The reductions over the chunk axis combine their partial results as follows.
 4. `argmin` and `argmax` add the offset of each chunk to its result, and select the
    result of the chunk with the extreme value.
 
+### Layout alignment
+
+An elementwise function of two operands with different chunk boundaries first gives both
+operands one layout. Equal layouts are used without a change. For different layouts, the
+result has the layout of the operand with the fewest chunks, which is the target
+operand. For equal numbers of chunks, the left operand is the target operand. This keeps
+the number of chunks at the minimum of the two operands, so a chain of operations does
+not increase it.
+
+The values of the other operand are moved into the target layout in one of two ways.
+
+1. **Deferred alignment.** The `ChunkedArray` allocates each output chunk, and applies
+   the function to each piece between two boundaries of either operand, with the `out`
+   argument of the NumPy function. The pieces are views, so the other operand is not
+   copied, and it is not split into chunks that are merged again later.
+2. **Rechunk.** The other operand is rechunked and sliced at the target boundaries, and
+   the function is applied per chunk.
+
+Deferred alignment makes one Python call per piece, so it is slow for many short pieces.
+The `ChunkedArray` uses it when the mean length of a piece is at least
+`min_chunk_length` (see [Chunk length limit](#chunk-length-limit)), and else it uses a
+rechunk. The array API has no `out` argument, so deferred alignment is only available
+for NumPy chunks. For other namespaces, such as JAX, the `ChunkedArray` always uses a
+rechunk.
+
+The strategies were measured for an addition of two NumPy arrays with 1 000 000 values
+and random boundaries. The table gives the median time and the number of chunks of the
+result. An addition without chunks took 0.95 ms.
+
+| Chunks of the operands | Union of the boundaries, views only | Polars rule          | Fewest chunks, rechunk | Fewest chunks, deferred |
+| ---------------------- | ----------------------------------- | -------------------- | ---------------------- | ----------------------- |
+| 4 and 4                | 1.27 ms, 7 chunks                   | 1.75 ms, 4 chunks    | 1.73 ms, 4 chunks      | 1.16 ms, 4 chunks       |
+| 4 and 64               | 1.81 ms, 67 chunks                  | 1.81 ms, 64 chunks   | 1.74 ms, 4 chunks      | 1.36 ms, 4 chunks       |
+| 64 and 64              | 2.00 ms, 127 chunks                 | 1.94 ms, 64 chunks   | 2.02 ms, 64 chunks     | 1.73 ms, 64 chunks      |
+| 16 and 1024            | 10.9 ms, 1039 chunks                | 3.69 ms, 1024 chunks | 2.33 ms, 16 chunks     | 2.82 ms, 16 chunks      |
+| 1024 and 1024          | 11.9 ms, 2046 chunks                | 3.07 ms, 1024 chunks | 3.10 ms, 1024 chunks   | 7.63 ms, 1024 chunks    |
+
+When one operand has one chunk, Polars slices that chunk at the boundaries of the other
+operand, which is free but keeps all chunks. The target rule instead gives a result with
+one chunk.
+
+| Chunks of the operands | Polars rule          | Fewest chunks, rechunk | Fewest chunks, deferred |
+| ---------------------- | -------------------- | ---------------------- | ----------------------- |
+| 1 and 4                | 1.51 ms, 4 chunks    | 4.27 ms, 1 chunk       | 1.03 ms, 1 chunk        |
+| 1 and 64               | 1.10 ms, 64 chunks   | 4.69 ms, 1 chunk       | 1.73 ms, 1 chunk        |
+| 1 and 1024             | 2.79 ms, 1024 chunks | 4.55 ms, 1 chunk       | 3.48 ms, 1 chunk        |
+| 1 and 4096             | 4.81 ms, 4096 chunks | 4.40 ms, 1 chunk       | 6.49 ms, 1 chunk        |
+
+A chain of 29 additions with operands of 4 to 64 chunks and random layouts shows the
+effect on the number of chunks.
+
+| Strategy                                                        | Time        | Chunks of the result |
+| --------------------------------------------------------------- | ----------- | -------------------- |
+| Union of the boundaries                                         | 136 ms      | 1028                 |
+| Polars rule                                                     | 61 to 68 ms | 35 to 50             |
+| Fewest chunks, rechunk                                          | 68 to 71 ms | 4 to 5               |
+| Fewest chunks, deferred                                         | 49 to 52 ms | 4 to 5               |
+| Fewest chunks, deferred or rechunk with `min_chunk_length=4096` | 45.5 ms     | 4                    |
+
+Four conclusions follow from these numbers.
+
+1. A split at the union of the boundaries copies nothing, but the number of chunks grows
+   with each new layout. In the chain, this made it the slowest strategy.
+2. The target operand with the fewest chunks keeps the number of chunks low, and it is
+   faster than the Polars rule in the chain.
+3. Deferred alignment is the fastest strategy for long pieces, and the slowest for short
+   pieces.
+4. The combination of deferred alignment and rechunk was the fastest in the chain.
+
+The ranges in the chain table are from repeated runs of the same benchmark. The numbers
+are for a benchmark with plain lists of NumPy arrays, so a `ChunkedArray` class adds a
+cost per chunk to all strategies.
+
+### Chunk length limit
+
+The cost per chunk is the cost of one Python call to the chunk namespace, and it is
+different for each namespace. The following numbers are the extra time per chunk for an
+addition of an array with 1 000 000 values, compared to the same addition without
+chunks.
+
+| Namespace                  | Extra time per chunk | Time per value |
+| -------------------------- | -------------------- | -------------- |
+| NumPy                      | 0.4 to 1.5 us        | 0.7 to 1.0 ns  |
+| JAX without `jax.jit`, CPU | 48 to 61 us          | 0.4 to 1.1 ns  |
+
+A limit on the number of chunks does not describe this cost, because 1000 chunks of 1
+000 000 values have a small cost per value, and 64 chunks of 100 values have a large
+cost per value. The limit is therefore a minimum mean chunk length, `min_chunk_length`.
+An operation that returns a `ChunkedArray` with a mean chunk length below
+`min_chunk_length` rechunks its result. `ChunkedArray` creation and `concat` also apply
+the limit. The same value selects deferred alignment or a rechunk in
+[Layout alignment](#layout-alignment).
+
+The default is different for each namespace, and the user can change it.
+
+1. For NumPy, the proposed default is 8192 values. The cost of a call is then about 10
+   percent of the cost of the computation on the chunk.
+2. For JAX without `jax.jit`, a call costs as much as about 50 000 to 130 000 values.
+   The proposed default is 2^20 values, so a JAX array is only chunked when its chunks
+   are large.
+
+A stream of 1000 batches of 1000 NumPy values, followed by 10 elementwise operations,
+took 21.2 ms without the limit. With a limit of 1024 or more values, the batches were
+rechunked one time, and the same operations took 12.1 ms. The same operations on one
+array without chunks took 11.6 ms. The defaults must be measured again with the
+`ChunkedArray` class, because the class adds a cost per chunk.
+
 ### Interface
 
 1. `ChunkedArray(chunks, chunk_axis=0)` creates an array from a sequence of arrays.
@@ -1279,11 +1379,8 @@ The reductions over the chunk axis combine their partial results as follows.
    without nulls. For 4 chunks, this took 0.01 ms against 0.74 ms for `to_numpy` on the
    full series. PyArrow has `ChunkedArray.chunks` for the same purpose.
 
-There is no automatic rechunk when the number of chunks is large, as in Polars. The user
-calls `rechunk`, and polder documents when a chunked array is useful. Many small chunks
-increase the cost of each operation, because each chunk is a separate Python call. If a
-limit is necessary, it is a setting `max_chunks` above which an operation rechunks its
-result. This is [open question 8](#open-questions).
+Unlike Polars, the `ChunkedArray` rechunks automatically when its chunks are short. See
+[Chunk length limit](#chunk-length-limit).
 
 ### Location
 
@@ -1312,17 +1409,19 @@ reasons.
 
 Dask support is part of G2, so Dask arrays are added to the eager tests in stage 12.
 Whether Dask support is sufficient without `ChunkedArray` is
-[open question 9](#open-questions).
+[open question 8](#open-questions).
 
 ### Stage 12: chunked arrays
 
 1. Add `polder.chunked.ChunkedArray` with its namespace and the fallback rule. This
    stage needs the corrections of D5 and D7 from stage 1.
 2. Run the `array-api-tests` suite against the namespace.
-3. Add the chunk rules in the order of the table in [Chunk rules](#chunk-rules). The
+3. Add the layout alignment and the chunk length limit, and measure the defaults of
+   `min_chunk_length` with the class.
+4. Add the chunk rules in the order of the table in [Chunk rules](#chunk-rules). The
    rules without a copy come first, because they are the reason for the type.
-4. Add `ChunkedArray` and Dask to the `value_array_type` fixture for the eager tests.
-5. Add `from_polars` and the creation from a PyArrow chunked array.
+5. Add `ChunkedArray` and Dask to the `value_array_type` fixture for the eager tests.
+6. Add `from_polars` and the creation from a PyArrow chunked array.
 
 ## Stage order
 
@@ -1348,20 +1447,25 @@ lazy defects have a higher priority than the new eager functions.
 1. Should the functions with the name of a Python builtin get a trailing underscore, as
    `abs_` and `round_` have? The alternative is `pld.sum` and `pld.abs` without an
    underscore, with the old names as aliases.
+
 2. Should a function return the label row of the extreme entry, in addition to `argmin`
    and `argmax`? A position is only valid for the label order of one array.
+
 3. Should the reductions accept label columns in addition to an axis number, such as
    `sum(array, over={0: ["year"]})`? This is equal to a `pivot` followed by a reduction,
    and it avoids the dense intermediate array.
+
 4. Should the check for unique labels run at creation, with a configuration setting to
    disable it, instead of in `align` and `pivot`?
+
 5. Is `rank` the correct default label for a sorted axis, or should `sort` on an array
    with more than one dimension be an error?
+
 6. Is a table of native expressions per backend acceptable in the lazy implementation?
    Without it, about 12 functions stay unsupported until Narwhals adds the expressions.
+
 7. Should integer overflow in the lazy implementation stay a documented difference
    between backends?
-8. Should a `ChunkedArray` rechunk automatically above a number of chunks, or only on
-   request, as in Polars?
-9. Is `ChunkedArray` necessary, or is Dask support in the eager implementation
+
+8. Is `ChunkedArray` necessary, or is Dask support in the eager implementation
    sufficient?
