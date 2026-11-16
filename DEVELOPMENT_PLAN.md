@@ -4,7 +4,7 @@ This plan lists the work that is necessary to reach the goals in `README.md`. Th
 implementation comes first and must support the full array functionality. The lazy
 implementation follows and must match the eager implementation.
 
-The plan has five parts.
+The plan has six parts.
 
 1. [Current state](#current-state) lists what exists, the defects that were found, and
    the measurements that the decisions refer to.
@@ -16,7 +16,10 @@ The plan has five parts.
    implementation details per stage.
 4. [Lazy implementation difficulties](#lazy-implementation-difficulties) lists the
    operations that are hard to implement lazily, each with a suggested solution.
-5. [Open questions](#open-questions) lists the choices that need a decision from the
+5. [Third implementation](#third-implementation) and
+   [Chunked implementation](#chunked-implementation) describe two further
+   implementations. The chunked implementation is not a goal in the README.
+6. [Open questions](#open-questions) lists the choices that need a decision from the
    maintainer.
 
 Statements about current behavior were checked with an experiment against commit
@@ -129,6 +132,44 @@ Label equality check on two frames with 1 000 000 rows and two columns:
 | `narwhals_df_equals`, which uses a full join               | 133 ms |
 | Comparison per column with `Series.__eq__` and a null mask | 5.6 ms |
 
+Steps of the eager alignment for `x + x`, with one integer label column and 1 000 000
+entries:
+
+| Step                                                             | Time    |
+| ---------------------------------------------------------------- | ------- |
+| Left join and `to_numpy` through Narwhals, as in `_align_labels` | 41.8 ms |
+| The same join in Polars, without Narwhals                        | 42.2 ms |
+| The Polars join only                                             | 38.8 ms |
+| Polars `with_row_index` and `to_numpy`                           | 0.6 ms  |
+| NumPy integer array index of the values                          | 1.4 ms  |
+| NumPy addition                                                   | 0.8 ms  |
+
+The Polars join has no fast path for frames with equal rows. It builds a hash table on
+one frame and probes it with the other. A frame in a shuffled order costs the same, 37.5
+ms. With one string column, the join takes 79 ms.
+
+Label comparison on one column with 1 000 000 rows:
+
+| Method                                 | Integer column | String column |
+| -------------------------------------- | -------------- | ------------- |
+| `pl.DataFrame.equals`                  | 0.7 ms         | 2.6 ms        |
+| Comparison per column through Narwhals | 1.5 ms         | 3.0 ms        |
+| Polars left join                       | 38.8 ms        | 79 ms         |
+
+Copies of the values:
+
+| Case                                                                     | Time   |
+| ------------------------------------------------------------------------ | ------ |
+| 1-D, 1 000 000 entries, integer array index                              | 1.4 ms |
+| 1-D, check if an index array equals `arange(n)`                          | 1.1 ms |
+| 2-D, 1000 by 1000, NumPy, two gathers in sequence, one per axis          | 5.7 ms |
+| 2-D, 1000 by 1000, NumPy, one gather with `np.ix_`                       | 4.8 ms |
+| 2-D, 1000 by 1000, JAX under `jax.jit` on CPU, two gathers in sequence   | 1.8 ms |
+| 2-D, 1000 by 1000, JAX under `jax.jit` on CPU, one gather with `jnp.ix_` | 0.6 ms |
+
+The compiled program for the two JAX gathers in sequence contains two gather operations,
+so XLA does not combine them.
+
 Chain of `k` additions on a 300 by 300 array:
 
 | `k` | Eager  | Lazy   |
@@ -137,7 +178,7 @@ Chain of `k` additions on a 300 by 300 array:
 | 4   | 6.8 ms | 41 ms  |
 | 8   | 69 ms  | 603 ms |
 
-Three conclusions follow from these numbers.
+Five conclusions follow from these numbers.
 
 1. In the eager implementation, the label work costs about 40 times more than the array
    operation, also for `x + x`. This is the largest gap to G4.
@@ -145,6 +186,12 @@ Three conclusions follow from these numbers.
    slower.
 3. The lazy implementation has a fixed cost of about 45 ms per million entries for
    `values()`, because it joins the values onto a dense index and sorts them.
+4. The Polars join is about 90 percent of the eager alignment cost, and Narwhals adds no
+   cost that can be measured. The join must be avoided, because it cannot be made faster
+   from polder.
+5. A gather that combines two reorders is faster than two gathers in sequence, with
+   NumPy and with JAX under `jax.jit`. See
+   [Third implementation](#third-implementation).
 
 ## Design decisions
 
@@ -337,9 +384,17 @@ the labels do not change, and that `align` compares objects with `is` before it 
 rows. This gives three levels of alignment cost.
 
 1. Same object: no label work and no copy of the values.
-2. Equal rows: one comparison per column, which took 5.6 ms for a million rows, and no
-   copy of the values.
+2. Equal rows: one comparison per column, which took 1.5 ms for a million integer rows,
+   and no copy of the values.
 3. Different order: a join and a reorder of the values, as today.
+
+Narwhals has no `DataFrame.equals`, so level 2 compares the columns one at a time with
+Narwhals series. This took 1.5 ms against 0.7 ms for `pl.DataFrame.equals`, so native
+code for each backend is not necessary.
+
+A check whether the permutation from the join is the identity is not an alternative to
+level 2. The check took 1.1 ms, which is about the same as the copy of 1.4 ms that it
+avoids, and the join that computes the permutation runs before the check.
 
 The rejected alternative is a cache of comparison results, with the identity of the
 frames as the key. It needs weak references to objects that Narwhals creates again on
@@ -966,11 +1021,196 @@ An index, `flip`, `roll`, `take` and an alignment only change `_indexed_labels` 
 `_positions` with one `xp.take` per axis, and then calls the eager operation. A chain of
 an index, an alignment and a second index therefore copies the values one time.
 
+Two position maps for one axis combine into one map with `second[first]`. This costs
+O(n) for an axis of length n. A gather of the values costs O(N), where N is the product
+of all axis lengths. A chain of k reorders therefore costs k combinations of small maps
+and one gather, instead of k gathers of all values. The gain depends on the shape.
+
+1. For a one-dimensional array, n is equal to N, so a combination costs about as much as
+   a gather. The gain is small.
+2. For a 1000 by 1000 array with one reorder per axis, one gather took 4.8 ms with NumPy
+   against 5.7 ms for two gathers. Under `jax.jit`, one gather took 0.6 ms against 1.8
+   ms. See [Measurements](#measurements).
+3. The gain increases with the number of axes and the length of the chain. An index that
+   selects a small part of a large array has the largest gain, because the full values
+   are never copied.
+
+Postponement does not remove the join. Alignment still needs the permutation, so the
+third implementation needs the levels from [Label identity](#label-identity) as well. A
+copy is also still necessary for each real reorder. NumPy cannot express an arbitrary
+permutation as a view, so the third implementation can only postpone and combine the
+copies.
+
 This structure matches the flow from the README, in which a transformation step, a
 computation step and a second transformation step follow each other. `pivot` and
 `unpivot` need more than a mapping per axis, so they apply the pending positions first.
 The design is a separate task after stage 10, because it can then reuse the index plans
 from stage 9.
+
+## Chunked implementation
+
+### Purpose
+
+Some operations copy all values, although the result contains the same values in the
+same order. `concat` copies each input into a new buffer. A slice is a view, but a
+`concat` of two slices is a copy. Data from a file reader or a stream arrives in
+batches, and an array of all batches needs a `concat`.
+
+Polars and Arrow store a column as a list of chunks. A concatenation then adds chunks to
+the list, and a slice selects chunks and slices the first and the last chunk. The
+chunked implementation uses the same structure for the value array. The label frames
+already have this structure when the backend is Polars.
+
+The following numbers were measured with NumPy values, Polars label frames, and 4 chunks
+of 250 000 entries.
+
+| Operation                                                               | Time    |
+| ----------------------------------------------------------------------- | ------- |
+| `np.concatenate` of the 4 value chunks                                  | 0.75 ms |
+| `nw.concat` of the 4 label frames, which keeps 4 chunks                 | 0.18 ms |
+| `pl.concat` of the 4 label frames with `rechunk=True`                   | 3.1 ms  |
+| Slice of a label frame with 1 000 000 rows, which shares the buffer     | 0.03 ms |
+| Addition of the full array                                              | 0.98 ms |
+| Addition per chunk                                                      | 0.87 ms |
+| Addition per piece of two arrays with different chunk boundaries        | 1.1 ms  |
+| Sum of the full array                                                   | 0.55 ms |
+| Sum per chunk, followed by a sum of the 4 results                       | 0.59 ms |
+| Gather with a random permutation from the full array                    | 4.5 ms  |
+| Gather with a random permutation from the chunks, with a mask per chunk | 65 ms   |
+
+An operation per chunk costs about as much as the same operation on the full array. A
+gather across chunks costs much more, so the chunked implementation concatenates the
+chunks before it gathers.
+
+### Structure
+
+The values are chunked along one axis, the chunk axis. Arrow and Polars also chunk along
+one dimension only. A grid of chunks along all axes, as in Dask, multiplies the number
+of chunks, and a binary operation must split each axis at the boundaries of both
+operands. The operations that benefit from chunks, which are `concat`, `stack` and
+slices, act on one axis.
+
+`ChunkedFrameLabeledArray` has the following fields.
+
+| Field         | Content                                                                                                                                                                    |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_chunks`     | A tuple of `EagerFrameLabeledArray` objects. Each chunk has the label frame objects of the full array on the other axes, and a slice of the label frame on the chunk axis. |
+| `_chunk_axis` | The number of the chunk axis                                                                                                                                               |
+| `_labels`     | The label frames of the full array. The frame of the chunk axis is the `nw.concat` of the chunk frames.                                                                    |
+| `_offsets`    | The start position of each chunk on the chunk axis, followed by the length of the axis                                                                                     |
+
+The chunks are eager arrays and not bare value arrays. Each operation on a chunk is then
+the existing eager function, with its alignment and its label rule. The chunked
+implementation only adds the rules that combine the chunk results, and it does not
+duplicate the label rules.
+
+The structure has three invariants.
+
+1. Each chunk has at least one entry, except in an array with length 0 on the chunk
+   axis, which has one empty chunk.
+2. All chunks have the same value array type, data type and device.
+3. The chunk axis is labeled, unless the array has one chunk.
+
+### Chunk rules
+
+Each function gets a rule for the chunks. A function without a rule calls `rechunk`,
+which concatenates the chunks into one chunk, and then calls the eager function. This
+fallback makes the implementation complete for the full protocol from the start. The
+rules in the table are added one at a time, in the order of their benefit.
+
+| Operation                                                                | Rule                                                                                                                                                                           | Copies of the values           |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ |
+| Slice or integer index on the chunk axis                                 | Select the chunks, and slice the first and the last chunk                                                                                                                      | None                           |
+| `concat` on the chunk axis                                               | Concatenate the chunk tuples                                                                                                                                                   | None                           |
+| `stack` on a new axis that becomes the chunk axis                        | Each input becomes one chunk with `expand_dims`. An input with more than one chunk is rechunked first.                                                                         | None for inputs with one chunk |
+| Index on another axis                                                    | Eager index per chunk                                                                                                                                                          | As in the eager implementation |
+| Elementwise function of one array                                        | Eager function per chunk                                                                                                                                                       | Output only                    |
+| Elementwise function of more arrays                                      | Split all operands at the union of their chunk boundaries, then apply the eager function per piece. An operand that is unlabeled on the chunk axis is broadcast and not split. | Output only                    |
+| Reduction over other axes                                                | Eager reduction per chunk                                                                                                                                                      | Output only                    |
+| Reduction over the chunk axis                                            | Reduction per chunk, then a combination of the partial results                                                                                                                 | Partial results only           |
+| `cumulative_sum`, `cumulative_prod` on the chunk axis                    | Function per chunk, then add or multiply the last result of the previous chunks                                                                                                | Output only                    |
+| `diff` on the chunk axis                                                 | Function per chunk, plus one difference at each boundary between two chunks                                                                                                    | Output only                    |
+| `permute_dims`, `moveaxis`                                               | Eager function per chunk, and a new chunk axis number                                                                                                                          | As in the eager implementation |
+| Reorder on the chunk axis: alignment with a join, `take`, `flip`, `sort` | `rechunk`, then the eager function                                                                                                                                             | One                            |
+| `pivot` or `unpivot` of the chunk axis                                   | `rechunk`, then the eager function                                                                                                                                             | One                            |
+
+The split for an elementwise function only creates views. The boundaries of both
+operands are combined with `np.union1d`, and each chunk is sliced at the boundaries that
+are inside it. The test with boundaries at 100 000 and at 250 000 created 7 pieces, and
+the result was equal to the addition of the full arrays.
+
+The reductions over the chunk axis combine their partial results as follows.
+
+1. `sum`, `prod`, `min`, `max`, `all`, `any` and `count_nonzero` apply the same
+   reduction to the partial results.
+2. `mean` is the sum of the partial sums, divided by the length of the axis.
+3. `var` and `std` use the parallel algorithm of Chan, Golub and LeVeque, which combines
+   a count, a mean and a sum of squared differences per chunk. A sum of squares followed
+   by one subtraction loses accuracy.
+4. `argmin` and `argmax` add the offset of each chunk to its result, and select the
+   result of the chunk with the extreme value.
+
+Alignment uses the levels from [Label identity](#label-identity) on the full label
+frames. At level 1 and level 2, the operation continues with the split rule. At level 3,
+the array that needs a reorder is rechunked first.
+
+### Interface
+
+1. `from_chunks(value_arrays, labels, *, chunk_axis=0)` creates an array. The label
+   frame of the chunk axis is one frame for the full axis, or one frame per chunk.
+2. `values()` returns one array, so it concatenates the chunks. This is the copy that
+   the user requests. An array with one chunk returns the value array without a copy.
+3. `value_chunks()` returns the tuple of value arrays without a copy.
+4. `rechunk()` returns an array with one chunk.
+5. `convert` to the eager implementation calls `rechunk`, and `convert` from the eager
+   implementation creates one chunk.
+
+A Polars series with more than one chunk has the method `get_chunks`, and `to_numpy` on
+one chunk returned a view for a numeric chunk without nulls. For 4 chunks, this took
+0.01 ms against 0.74 ms for `to_numpy` on the full series. `from_frame` can therefore
+create one value chunk per frame chunk without a copy. Narwhals has no interface for
+chunks, so this needs native code for Polars and for PyArrow, which has
+`ChunkedArray.chunks`.
+
+Many small chunks increase the cost per operation, because each chunk is a separate
+Python call. Polars rechunks automatically in some operations for this reason. The
+proposal is a setting `config.max_chunks`, above which an operation calls `rechunk` on
+its result. The default value must come from a benchmark, and the setting is
+[open question 8](#open-questions).
+
+### JAX arrays
+
+The tuple of chunks is a pytree, so the chunked implementation works with `jax.jit`. The
+number of chunks is part of the tree structure, so `jax.jit` compiles the function again
+when the number of chunks changes. The benefit of chunks under `jax.jit` was not
+measured. NumPy is the main use case.
+
+### Dask arrays
+
+Dask is a library for chunked arrays, and the eager implementation already accepts Dask
+arrays. Creation, `sin` and a binary operation returned Dask arrays, and
+`da.concatenate` kept the chunks. Dask is not a replacement for the chunked
+implementation, for two reasons.
+
+1. Dask builds a task graph and runs it on `compute`. An addition of two arrays with 1
+   000 000 entries in 4 chunks took 7.8 ms with `compute`, against 1.2 ms in NumPy. A
+   chain of 8 additions took 14.1 ms against 8.1 ms.
+2. A boolean filter returns an array with an unknown length, which Dask stores as `nan`.
+   `EagerFrameLabeledArray.__post_init__` requires integer lengths, so such an operation
+   fails.
+
+Dask support is part of G2, so Dask arrays are added to the eager tests in stage 12.
+Whether Dask support is sufficient without the chunked implementation is
+[open question 9](#open-questions).
+
+### Stage 12: chunked implementation
+
+1. Add `ChunkedFrameLabeledArray` with the fallback rule, `from_chunks`, `value_chunks`,
+   `rechunk` and `convert`. See [Chunked implementation](#chunked-implementation).
+2. Add the chunk rules in the order of the table in [Chunk rules](#chunk-rules). The
+   rules without a copy come first, because they are the reason for the implementation.
+3. Add `from_frame` for Polars and PyArrow frames with more than one chunk.
+4. Add Dask to the `value_array_type` fixture for the eager tests.
 
 ## Stage order
 
@@ -983,6 +1223,10 @@ The order of the stages follows from three rules.
 3. Inside each implementation, the functions with a simple label rule come first. The
    functions that change the shape and need new arguments come later, so that the open
    questions about their labels do not block the other work.
+
+Stage 12 adds an implementation that is not a goal in the README, so it comes last. Its
+fallback rule makes it complete from the start, so it can start after stage 1 when the
+need is larger.
 
 Stage 8 does not depend on stages 2 to 7. It can start when stage 1 is complete, if the
 lazy defects have a higher priority than the new eager functions.
@@ -1005,3 +1249,7 @@ lazy defects have a higher priority than the new eager functions.
    Without it, about 12 functions stay unsupported until Narwhals adds the expressions.
 7. Should integer overflow in the lazy implementation stay a documented difference
    between backends?
+8. Should the chunked implementation rechunk automatically above a number of chunks, as
+   Polars does, or only on request?
+9. Is a chunked implementation in polder necessary, or is Dask support in the eager
+   implementation sufficient?
