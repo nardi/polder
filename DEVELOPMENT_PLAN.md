@@ -16,9 +16,8 @@ The plan has six parts.
    implementation details per stage.
 4. [Lazy implementation difficulties](#lazy-implementation-difficulties) lists the
    operations that are hard to implement lazily, each with a suggested solution.
-5. [Third implementation](#third-implementation) and [Chunked arrays](#chunked-arrays)
-   describe a further implementation and a chunked value array type. The chunked arrays
-   are not a goal in the README.
+5. [Indexed arrays](#indexed-arrays) describes a value array type with pending indices
+   and chunks, which meets G6 without a third implementation of the protocol.
 6. [Open questions](#open-questions) lists the choices that need a decision from the
    maintainer.
 
@@ -203,7 +202,7 @@ Five conclusions follow from these numbers.
 5. A gather that combines two reorders is faster than two gathers in sequence, with
    NumPy and with JAX under `jax.jit`. Under `jax.jit`, each position map is also stored
    in the executable, so combined maps also make the executable smaller. See
-   [Third implementation](#third-implementation).
+   [Gains of pending operations](#gains-of-pending-operations).
 
 ## Design decisions
 
@@ -767,13 +766,10 @@ the sum of the sizes of the earlier arrays, which comes from their shape frames 
 cross join. The label frames get the same offset, and all frames are combined with
 `nw.concat`.
 
-### Stage 11: backends and the third implementation
+### Stage 11: backends
 
 1. Add DuckDB to the `dev` dependency group and to the `frame_backend` fixture. Correct
    the differences from [Backend coverage](#backend-coverage).
-2. Design the third implementation from the README. See
-   [Third implementation](#third-implementation).
-3. Extend `convert` and the `FrameLabeledArrayImplementation` enumeration.
 
 ## Lazy implementation difficulties
 
@@ -1017,70 +1013,25 @@ DuckDB was tested as a lazy engine on the Narwhals level, with frames from
 `select` of a literal. Both forms are in use in the lazy implementation, so stage 11
 must find the cause and a form that works on both backends.
 
-## Third implementation
-
-G6 describes an implementation that holds an eager value array and applies index
-operations lazily. The proposed structure reuses parts of both existing implementations.
-
-| Field             | Content                                                                                                    |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| `_values`         | The value array, as in the eager implementation                                                            |
-| `_indexed_labels` | One lazy label frame per axis, with an `__index` column, as in the lazy implementation                     |
-| `_positions`      | One lazy frame per axis, or `None`. The frame maps each position of the result to a position in `_values`. |
-
-An index, `flip`, `roll`, `take` and an alignment only change `_indexed_labels` and
-`_positions`. An operation that needs the values first applies each pending frame in
-`_positions` with one `xp.take` per axis, and then calls the eager operation. A chain of
-an index, an alignment and a second index therefore copies the values one time.
-
-Two position maps for one axis combine into one map with `second[first]`. This costs
-O(n) for an axis of length n. A gather of the values costs O(N), where N is the product
-of all axis lengths. A chain of k reorders therefore costs k combinations of small maps
-and one gather, instead of k gathers of all values. The gain depends on the shape.
-
-1. For a one-dimensional array, n is equal to N, so a combination costs about as much as
-   a gather. The gain is small.
-2. For a 1000 by 1000 array with one reorder per axis, one gather took 4.8 ms with NumPy
-   against 5.7 ms for two gathers. Under `jax.jit`, one gather took 0.6 ms against 1.8
-   ms. See [Measurements](#measurements).
-3. Under `jax.jit`, the label frames are static, because `EagerFrameLabeledArray`
-   registers them as metadata of the pytree. The alignment and the position maps are
-   therefore computed during tracing, so the join runs one time per compilation and not
-   on each call. Each map is a NumPy array that XLA stores as a constant in the
-   executable. A chain of 4 reorders on one axis with 100 000 entries gave an executable
-   of 1 142 kB, and the combined map gave 289 kB. The size of the executable grows with
-   the number of maps, so combination keeps it small. The eager implementation inside a
-   traced function stores one map for each reorder. Maps for different axes cannot be
-   combined, so a gather with `np.ix_` has the same size as one gather per axis.
-4. The gain increases with the number of axes and the length of the chain. An index that
-   selects a small part of a large array has the largest gain, because the full values
-   are never copied.
-
-Postponement does not remove the join. Alignment still needs the permutation, so the
-third implementation needs the levels from [Label identity](#label-identity) as well. A
-copy is also still necessary for each real reorder. NumPy cannot express an arbitrary
-permutation as a view, so the third implementation can only postpone and combine the
-copies.
-
-This structure matches the flow from the README, in which a transformation step, a
-computation step and a second transformation step follow each other. `pivot` and
-`unpivot` need more than a mapping per axis, so they apply the pending positions first.
-The design is a separate task after stage 10, because it can then reuse the index plans
-from stage 9.
-
-## Chunked arrays
+## Indexed arrays
 
 ### Purpose
 
-Some operations copy all values, although the result contains the same values in the
-same order. `concat` copies each input into a new buffer. A slice is a view, but a
-`concat` of two slices is a copy. Data from a file reader or a stream arrives in
-batches, and an array of all batches needs a `concat`.
+G6 describes an implementation that holds eager values and applies index operations
+lazily, so that several slicing and reshaping operations do not copy the values each
+time. A second source of copies is a change of the chunk layout. `concat` copies each
+input into a new buffer, and a `concat` of two slices is a copy, although the result
+contains the same values in the same order. Data from a file reader or a stream arrives
+in batches, and an array of all batches needs a `concat`.
 
-Polars and Arrow store a column as a list of chunks. A concatenation then adds chunks to
-the list, and a slice selects chunks and slices the first and the last chunk. A chunked
-array uses the same structure for the value array. The label frames already have this
-structure when the backend is Polars.
+Both sources of copies have the same solution. An array keeps its existing buffers and a
+pending index into them, and it applies the index only when an operation needs the
+values. This plan therefore proposes one value array type for both, `IndexedArray`. It
+follows the array API, so the eager implementation holds it as its value array. A third
+implementation of the protocol is not necessary for G6. See
+[Design decision](#design-decision).
+
+### Measurements of copies
 
 The following numbers were measured with NumPy values, Polars label frames, and 4 chunks
 of 250 000 entries.
@@ -1093,11 +1044,15 @@ of 250 000 entries.
 | Slice of a label frame with 1 000 000 rows, which shares the buffer | 0.03 ms |
 | Addition of the full array                                          | 0.98 ms |
 | Addition per chunk                                                  | 0.87 ms |
-| Addition per piece of two arrays with different chunk boundaries    | 1.1 ms  |
 | Sum of the full array                                               | 0.55 ms |
 | Sum per chunk, followed by a sum of the 4 results                   | 0.59 ms |
 
 An operation per chunk costs about as much as the same operation on the full array.
+
+A slice of a NumPy array is a view, but a slice of a JAX array outside `jax.jit` is a
+copy. For an array with 1 000 000 values, 64 slices that cover the array took 0.008 ms
+with NumPy and 3.2 ms with JAX. One copy of the full JAX array took 0.45 ms. A pending
+slice is therefore also useful without chunks, for JAX values.
 
 ### Rechunking in Polars
 
@@ -1138,31 +1093,43 @@ user explicit control with `rechunk`. It has no limit on the number of chunks.
 
 ### Design decision
 
-The chunks are in an array type that follows the array API, `ChunkedArray`, and not in a
-separate implementation of the protocol. A `ChunkedArray` is a value array like a NumPy
-array, so the eager implementation holds it without a change. The rejected alternative
-is a separate implementation of the protocol, `ChunkedFrameLabeledArray`, which holds a
-tuple of eager arrays.
+The pending index is in an array type that follows the array API, and not in an
+implementation of the protocol. Two alternatives are rejected.
+
+1. A third implementation of the protocol, with lazy label frames and one position map
+   per axis. This is the form that the README describes for G6.
+2. A chunked implementation of the protocol, `ChunkedFrameLabeledArray`, which holds a
+   tuple of eager arrays.
 
 The reasons are:
 
 1. The README describes polder as a layer over array and DataFrame libraries, which does
-   the computation in those libraries. Chunks are a property of the value storage, so
-   they belong in the array library.
+   the computation in those libraries. Chunks and pending indices are properties of the
+   value storage, so they belong in the array library.
 2. G2 already requires that the eager implementation accepts each array that follows the
-   array API. A `ChunkedArray` then needs no code in polder, and the user selects it by
-   the type of the values.
-3. The label rules do not depend on chunks. The rejected alternative splits the label
-   frames with the chunks, so that each chunk can reuse the eager label rules. This
-   split has no benefit, because alignment compares the full label frames, and Polars
-   already keeps the label frames in chunks.
-4. A `ChunkedArray` is useful outside polder, and the `array-api-tests` suite can test
+   array API. An `IndexedArray` then needs no code in polder, and the user selects it by
+   the type of the values. Each new function in polder also needs one implementation
+   less.
+3. The label rules do not depend on chunks or on pending indices. Alignment compares the
+   full label frames, and Polars already keeps the label frames in chunks.
+4. The position maps of the rejected third implementation are pending integer indices,
+   and chunks are pending ranges over several buffers. One type with both kinds of index
+   can combine an alignment, a slice and a `concat` without a copy in between.
+5. An `IndexedArray` is useful outside polder, and the `array-api-tests` suite can test
    it, because it is a complete array API namespace.
 
+The rejected third implementation has one property that an array type cannot have, which
+is a pending operation on the label frames, for example with Narwhals lazy frames. A
+label frame has one row per entry of its axis, while the values have one entry per
+combination of all axes. The copies of label frames are therefore small, and the
+alignment join is not avoided by postponement. Whether lazy label frames are useful
+depends on a measurement of chained label operations, which is
+[open question 9](#open-questions).
+
 A prototype of about 100 lines confirmed that the current eager implementation works
-with a `ChunkedArray`. The prototype chunked along axis 0, implemented the operators,
-`__getitem__` and `concat`, and called NumPy after a rechunk for all other functions.
-The following operations returned correct results.
+with a chunked array type. The prototype chunked along axis 0, implemented the
+operators, `__getitem__` and `concat`, and called NumPy after a rechunk for all other
+functions. The following operations returned correct results.
 
 | Operation                                                    | Chunks of the result                                     |
 | ------------------------------------------------------------ | -------------------------------------------------------- |
@@ -1176,18 +1143,28 @@ The following operations returned correct results.
 The prototype showed three requirements on polder. `pld.from_values_and_labels` rejects
 the array, which is D5. `values()` indexes with `...`, so `__getitem__` must expand
 `...` to slices, or `values()` must return the value array without an index. `align`
-indexes with an integer array also when the labels are equal, which is D7, and this
-rechunks the second operand.
+indexes with an integer array also when the labels are equal, which is D7.
 
 ### Structure
 
-`ChunkedArray` has the following attributes.
+`IndexedArray` has the following attributes.
 
-| Attribute                                  | Content                                                        |
-| ------------------------------------------ | -------------------------------------------------------------- |
-| `chunks`                                   | A tuple of arrays from one namespace, such as NumPy or JAX     |
-| `chunk_axis`                               | The number of the axis along which the chunks are concatenated |
-| `shape`, `dtype`, `device`, `ndim`, `size` | As in the array API, computed from the chunks                  |
+| Attribute                                  | Content                                                                                                        |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `buffers`                                  | A tuple of arrays from one namespace, such as NumPy or JAX. The buffers are concatenated along the chunk axis. |
+| `chunk_axis`                               | The number of the axis along which the buffers are concatenated                                                |
+| `index`                                    | One map per axis. A map is `None` for no change, a list of ranges, or an integer array.                        |
+| `layout`                                   | The chunk boundaries of the result on the chunk axis                                                           |
+| `shape`, `dtype`, `device`, `ndim`, `size` | As in the array API, computed from the buffers and the maps                                                    |
+
+A map on the chunk axis refers to positions in the concatenation of all buffers. A list
+of ranges, such as `[(buffer 0, 100, 250000), (buffer 1, 0, 50000)]`, selects contiguous
+runs of the buffers. An integer array selects single positions. A map on another axis
+refers to positions in each buffer.
+
+A chunk of the result is a group of runs between two boundaries of `layout`. A chunk
+with one run is a slice of one buffer. A chunk with more than one run needs a `concat`
+when its values are computed.
 
 The values are chunked along one axis. Arrow and Polars also chunk along one dimension
 only. A grid of chunks along all axes, as in Dask, multiplies the number of chunks, and
@@ -1195,61 +1172,111 @@ a binary operation must align the boundaries on each axis.
 
 The structure has three invariants.
 
-1. All chunks have the same data type, device and namespace, and the same lengths on all
-   axes except the chunk axis.
+1. All buffers have the same data type, device and namespace, and the same lengths on
+   all axes except the chunk axis.
 2. A chunk is empty only in an array with length 0 on the chunk axis. Unlike Polars, a
    filter removes the empty chunks, because an empty chunk adds a Python call to each
    later operation.
-3. A `ChunkedArray` with one chunk is valid. `rechunk` returns the chunk array itself,
-   not a `ChunkedArray`.
+3. Adjacent runs of the same buffer are merged into one run, so a split followed by a
+   merge of the same buffer gives one slice.
 
-`__array_namespace__` returns the namespace of the `ChunkedArray` module. The namespace
-accepts plain arrays of the chunk namespace as operands and treats each one as one
-chunk. This is necessary because `array_api_compat.array_namespace` raises `TypeError`
-for a `ChunkedArray` and a NumPy array together.
+`__array_namespace__` returns the namespace of the `IndexedArray` module. The namespace
+accepts plain arrays of the buffer namespace as operands and treats each one as one
+buffer. This is necessary because `array_api_compat.array_namespace` raises `TypeError`
+for an `IndexedArray` and a NumPy array together.
 
-### Chunk rules
+### Pending operations
 
-Each function in the namespace has a rule for the chunks. A function without a rule
-rechunks its `ChunkedArray` arguments and calls the function of the chunk namespace.
-This fallback makes the namespace complete from the start. The rules in the table are
-added one at a time, in the order of their benefit.
+The following operations only change `index` and `layout`. They do not read or copy the
+values.
 
-| Function                                                    | Rule                                                                                             | Copies of the values                   | Polars                                                       |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------ |
-| Slice or integer index on the chunk axis                    | Select the chunks, and slice the first and the last chunk                                        | None                                   | Same                                                         |
-| `concat` on the chunk axis                                  | Concatenate the chunk tuples                                                                     | None                                   | Same, with `rechunk=False`                                   |
-| `stack` on a new axis that becomes the chunk axis           | Each input becomes one chunk with `expand_dims`                                                  | None                                   | No equivalent                                                |
-| Index on another axis                                       | Index each chunk                                                                                 | As for the chunk namespace             | No equivalent                                                |
-| Elementwise function of one array                           | Function per chunk                                                                               | Output only                            | Same                                                         |
-| Elementwise function of more arrays                         | Align the chunk layouts to the operand with the fewest chunks, then apply the function per chunk | Output only, or one copy of an operand | Rechunks the left operand when both have more than one chunk |
-| Reduction over other axes                                   | Reduction per chunk                                                                              | Output only                            | No equivalent                                                |
-| Reduction over the chunk axis                               | Reduction per chunk, then a combination of the partial results                                   | Partial results only                   | Not checked                                                  |
-| `cumulative_sum`, `cumulative_prod` on the chunk axis       | Function per chunk, then add or multiply the last result of the previous chunks                  | Output only                            | Not checked                                                  |
-| `diff` on the chunk axis                                    | Function per chunk, plus one difference at each boundary between two chunks                      | Output only                            | Not checked                                                  |
-| `take` or an integer array index on the chunk axis          | Gather from the chunks for few indices, else rechunk and gather                                  | Output only, or one                    | Gather from the chunks for numeric values                    |
-| `permute_dims`, `moveaxis`                                  | Function per chunk, and a new `chunk_axis`                                                       | As for the chunk namespace             | No equivalent                                                |
-| `reshape`, `sort`, `flip`, other reorders on the chunk axis | Rechunk, then the function of the chunk namespace                                                | One                                    | Rechunks for a sort of some data types                       |
+1. `__getitem__` with a slice, an integer or an integer array, and `take`. A boolean
+   mask is converted to an integer array first.
+2. `flip` and `roll`. A `roll` on the chunk axis is two ranges.
+3. `concat` on the chunk axis, which adds the buffers and the maps of the inputs. The
+   maps on the other axes must be equal, else the inputs with a different map are
+   computed first.
+4. `expand_dims`, `squeeze`, `permute_dims`, `moveaxis` and `matrix_transpose`, which
+   change the axis numbers.
+5. A change of `layout`, such as the alignment of chunk layouts in a binary operation.
 
-The chunk layouts of an elementwise function are aligned as described in
-[Layout alignment](#layout-alignment).
+Two maps for one axis combine into one map. Two lists of ranges give a list of ranges. A
+combination with an integer array gives an integer array, as `second[first]`. This costs
+O(n) for an axis of length n. A gather of the values costs O(N), where N is the product
+of all axis lengths. A chain of k reorders therefore costs k combinations of small maps
+and one gather, instead of k gathers of all values.
 
-The gather from chunks follows the measurements below, with 1 000 000 values and a
-search on the chunk offsets with `np.searchsorted`.
+Each other function computes the values of each chunk first. For a chunk, it indexes
+each run of a buffer with its maps, and it uses `concat` when the chunk has more than
+one run. A slice of a NumPy buffer is a view, so a chunk with one run and only ranges in
+its maps is not copied.
 
-| Chunks | Indices   | Rechunk and gather | Gather from the chunks |
-| ------ | --------- | ------------------ | ---------------------- |
-| 4      | 1 000 000 | 10 ms              | 83 ms                  |
-| 4      | 15 625    | 0.66 ms            | 0.70 ms                |
-| 4      | 1 000     | 0.59 ms            | 0.04 ms                |
-| 64     | 1 000 000 | 7.8 ms             | 143 ms                 |
-| 64     | 15 625    | 0.85 ms            | 1.8 ms                 |
-| 64     | 1 000     | 0.72 ms            | 0.25 ms                |
+An integer array on the chunk axis is applied with a gather from the buffers when the
+number of indices is smaller than about 1/64 of the number of values. Else the buffers
+are concatenated first. The ratio comes from the measurements below, with 1 000 000
+values and a search on the buffer offsets with `np.searchsorted`. It is equal to the
+ratio that Polars uses for nested values, and a setting can change it. The ratio for JAX
+buffers must come from a separate benchmark.
 
-The gather from the chunks is faster when the number of indices is smaller than about
-1/64 of the number of values, which is the ratio that Polars uses for nested values. The
-`ChunkedArray` uses the same ratio, with a setting to change it. The ratio for JAX
-chunks must come from a separate benchmark.
+| Buffers | Indices   | Concatenate and gather | Gather from the buffers |
+| ------- | --------- | ---------------------- | ----------------------- |
+| 4       | 1 000 000 | 10 ms                  | 83 ms                   |
+| 4       | 15 625    | 0.66 ms                | 0.70 ms                 |
+| 4       | 1 000     | 0.59 ms                | 0.04 ms                 |
+| 64      | 1 000 000 | 7.8 ms                 | 143 ms                  |
+| 64      | 15 625    | 0.85 ms                | 1.8 ms                  |
+| 64      | 1 000     | 0.72 ms                | 0.25 ms                 |
+
+### Gains of pending operations
+
+The gain depends on the shape and on the operations.
+
+1. For a one-dimensional array, n is equal to N, so a combination of two integer maps
+   costs about as much as a gather. The gain is small.
+2. For a 1000 by 1000 array with one reorder per axis, one gather took 4.8 ms with NumPy
+   against 5.7 ms for two gathers. Under `jax.jit`, one gather took 0.6 ms against 1.8
+   ms. See [Measurements](#measurements).
+3. A layout change of an array whose chunks are slices of one buffer only changes the
+   runs. A split of 1 000 000 values into 64 chunks, followed by a split into 4 chunks,
+   took 0.82 ms with NumPy when each step created its chunks, and 0.10 ms with pending
+   runs. With JAX, the times were 7.5 ms and 1.1 ms.
+4. Under `jax.jit`, the label frames are static, because `EagerFrameLabeledArray`
+   registers them as metadata of the pytree. The alignment and the maps are therefore
+   computed during tracing, so the join runs one time per compilation and not on each
+   call. Each map is a NumPy array that XLA stores as a constant in the executable. A
+   chain of 4 reorders on one axis with 100 000 entries gave an executable of 1 142 kB,
+   and the combined map gave 289 kB. The eager implementation with plain arrays stores
+   one map for each reorder. Maps for different axes cannot be combined, so a gather
+   with `np.ix_` has the same size as one gather per axis.
+5. The gain increases with the number of axes and the length of the chain. An index that
+   selects a small part of a large array has the largest gain, because the full values
+   are never copied.
+
+Postponement does not remove the join. Alignment still needs the permutation, so the
+levels from [Label identity](#label-identity) are still necessary. A copy is also still
+necessary for each real reorder, because NumPy cannot express an arbitrary permutation
+as a view. An `IndexedArray` can only postpone and combine the copies.
+
+### Rules per function
+
+Each function in the namespace has a rule. A function without a rule computes all
+chunks, concatenates them, and calls the function of the buffer namespace. This fallback
+makes the namespace complete from the start. The rules in the table are added one at a
+time, in the order of their benefit.
+
+| Function                                              | Rule                                                                                       | Copies of the values                   | Polars                                                       |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------ |
+| Slice, integer, integer array or `take`               | Pending, see [Pending operations](#pending-operations)                                     | None                                   | Slices keep chunks. A gather returns one chunk.              |
+| `concat` on the chunk axis                            | Pending                                                                                    | None                                   | Same, with `rechunk=False`                                   |
+| `stack` on a new axis that becomes the chunk axis     | Each input becomes one buffer with `expand_dims`                                           | None                                   | No equivalent                                                |
+| `flip`, `roll`, `permute_dims`, `moveaxis`            | Pending                                                                                    | None                                   | No equivalent                                                |
+| Elementwise function of one array                     | Function per chunk                                                                         | Output only                            | Same                                                         |
+| Elementwise function of more arrays                   | Align the layouts to the operand with the fewest chunks, then apply the function per chunk | Output only, or one copy of an operand | Rechunks the left operand when both have more than one chunk |
+| Reduction over other axes                             | Reduction per chunk                                                                        | Output only                            | No equivalent                                                |
+| Reduction over the chunk axis                         | Reduction per chunk, then a combination of the partial results                             | Partial results only                   | Not checked                                                  |
+| `cumulative_sum`, `cumulative_prod` on the chunk axis | Function per chunk, then add or multiply the last result of the previous chunks            | Output only                            | Not checked                                                  |
+| `diff` on the chunk axis                              | Function per chunk, plus one difference at each boundary between two chunks                | Output only                            | Not checked                                                  |
+| `reshape` and `sort` on the chunk axis                | Concatenate, then the function of the buffer namespace                                     | One                                    | Rechunks for a sort of some data types                       |
 
 The reductions over the chunk axis combine their partial results as follows.
 
@@ -1271,73 +1298,98 @@ operand. For equal numbers of chunks, the left operand is the target operand. Th
 the number of chunks at the minimum of the two operands, so a chain of operations does
 not increase it.
 
-The values of the other operand are moved into the target layout in one of two ways.
+The layout of the other operand is changed to the target layout as a pending operation,
+so this step only changes its runs. When the function is applied, a target chunk can
+contain runs of more than one buffer of the other operand. These runs are combined in
+one of two ways.
 
-1. **Deferred alignment.** The `ChunkedArray` allocates each output chunk, and applies
-   the function to each piece between two boundaries of either operand, with the `out`
-   argument of the NumPy function. The pieces are views, so the other operand is not
-   copied, and it is not split into chunks that are merged again later.
-2. **Rechunk.** The other operand is rechunked and sliced at the target boundaries, and
-   the function is applied per chunk.
+1. **Output argument.** The `IndexedArray` allocates the output chunk and applies the
+   function to each run, with the `out` argument of the NumPy function. The runs are
+   views, so the other operand is not copied. The array API has no `out` argument, so
+   this way is only available for NumPy buffers.
+2. **Concatenation.** The runs of the other operand are concatenated for each target
+   chunk, or all of its buffers are concatenated one time, and the function is applied
+   per chunk. Both use only array API functions.
 
-Deferred alignment makes one Python call per piece, so it is slow for many short pieces.
-The `ChunkedArray` uses it when the mean length of a piece is at least
-`min_chunk_length` (see [Chunk length limit](#chunk-length-limit)), and else it uses a
-rechunk. The array API has no `out` argument, so deferred alignment is only available
-for NumPy chunks. For other namespaces, such as JAX, the `ChunkedArray` always uses a
-rechunk.
+When the runs of the other operand come from one buffer, the merge of adjacent runs
+gives one slice per target chunk, so no concatenation is necessary.
+
+The output argument makes one Python call per run, so it is slow for many short runs.
+The `IndexedArray` uses it for NumPy buffers when the mean length of a run is at least
+`min_chunk_length` (see [Chunk length limit](#chunk-length-limit)). In all other cases
+it concatenates all buffers of the other operand one time.
 
 The strategies were measured for an addition of two NumPy arrays with 1 000 000 values
 and random boundaries. The table gives the median time and the number of chunks of the
 result. An addition without chunks took 0.95 ms.
 
-| Chunks of the operands | Union of the boundaries, views only | Polars rule          | Fewest chunks, rechunk | Fewest chunks, deferred |
-| ---------------------- | ----------------------------------- | -------------------- | ---------------------- | ----------------------- |
-| 4 and 4                | 1.27 ms, 7 chunks                   | 1.75 ms, 4 chunks    | 1.73 ms, 4 chunks      | 1.16 ms, 4 chunks       |
-| 4 and 64               | 1.81 ms, 67 chunks                  | 1.81 ms, 64 chunks   | 1.74 ms, 4 chunks      | 1.36 ms, 4 chunks       |
-| 64 and 64              | 2.00 ms, 127 chunks                 | 1.94 ms, 64 chunks   | 2.02 ms, 64 chunks     | 1.73 ms, 64 chunks      |
-| 16 and 1024            | 10.9 ms, 1039 chunks                | 3.69 ms, 1024 chunks | 2.33 ms, 16 chunks     | 2.82 ms, 16 chunks      |
-| 1024 and 1024          | 11.9 ms, 2046 chunks                | 3.07 ms, 1024 chunks | 3.10 ms, 1024 chunks   | 7.63 ms, 1024 chunks    |
+| Chunks of the operands | Union of the boundaries, views only | Polars rule          | Fewest chunks, concatenation of all buffers | Fewest chunks, output argument |
+| ---------------------- | ----------------------------------- | -------------------- | ------------------------------------------- | ------------------------------ |
+| 4 and 4                | 1.27 ms, 7 chunks                   | 1.75 ms, 4 chunks    | 1.73 ms, 4 chunks                           | 1.16 ms, 4 chunks              |
+| 4 and 64               | 1.81 ms, 67 chunks                  | 1.81 ms, 64 chunks   | 1.74 ms, 4 chunks                           | 1.36 ms, 4 chunks              |
+| 64 and 64              | 2.00 ms, 127 chunks                 | 1.94 ms, 64 chunks   | 2.02 ms, 64 chunks                          | 1.73 ms, 64 chunks             |
+| 16 and 1024            | 10.9 ms, 1039 chunks                | 3.69 ms, 1024 chunks | 2.33 ms, 16 chunks                          | 2.82 ms, 16 chunks             |
+| 1024 and 1024          | 11.9 ms, 2046 chunks                | 3.07 ms, 1024 chunks | 3.10 ms, 1024 chunks                        | 7.63 ms, 1024 chunks           |
 
 When one operand has one chunk, Polars slices that chunk at the boundaries of the other
 operand, which is free but keeps all chunks. The target rule instead gives a result with
 one chunk.
 
-| Chunks of the operands | Polars rule          | Fewest chunks, rechunk | Fewest chunks, deferred |
-| ---------------------- | -------------------- | ---------------------- | ----------------------- |
-| 1 and 4                | 1.51 ms, 4 chunks    | 4.27 ms, 1 chunk       | 1.03 ms, 1 chunk        |
-| 1 and 64               | 1.10 ms, 64 chunks   | 4.69 ms, 1 chunk       | 1.73 ms, 1 chunk        |
-| 1 and 1024             | 2.79 ms, 1024 chunks | 4.55 ms, 1 chunk       | 3.48 ms, 1 chunk        |
-| 1 and 4096             | 4.81 ms, 4096 chunks | 4.40 ms, 1 chunk       | 6.49 ms, 1 chunk        |
+| Chunks of the operands | Polars rule          | Fewest chunks, concatenation of all buffers | Fewest chunks, output argument |
+| ---------------------- | -------------------- | ------------------------------------------- | ------------------------------ |
+| 1 and 4                | 1.51 ms, 4 chunks    | 4.27 ms, 1 chunk                            | 1.03 ms, 1 chunk               |
+| 1 and 64               | 1.10 ms, 64 chunks   | 4.69 ms, 1 chunk                            | 1.73 ms, 1 chunk               |
+| 1 and 1024             | 2.79 ms, 1024 chunks | 4.55 ms, 1 chunk                            | 3.48 ms, 1 chunk               |
+| 1 and 4096             | 4.81 ms, 4096 chunks | 4.40 ms, 1 chunk                            | 6.49 ms, 1 chunk               |
 
-A chain of 29 additions with operands of 4 to 64 chunks and random layouts shows the
-effect on the number of chunks.
+The ways that only use array API functions were measured in a second benchmark, with the
+target layout from the left operand. The times are medians in milliseconds. JAX ran
+without `jax.jit` on the CPU.
 
-| Strategy                                                        | Time        | Chunks of the result |
-| --------------------------------------------------------------- | ----------- | -------------------- |
-| Union of the boundaries                                         | 136 ms      | 1028                 |
-| Polars rule                                                     | 61 to 68 ms | 35 to 50             |
-| Fewest chunks, rechunk                                          | 68 to 71 ms | 4 to 5               |
-| Fewest chunks, deferred                                         | 49 to 52 ms | 4 to 5               |
-| Fewest chunks, deferred or rechunk with `min_chunk_length=4096` | 45.5 ms     | 4                    |
+| Values | Chunks of the operands | Concatenation per target chunk | Function per run, then concatenation of the results | Concatenation of all buffers | Output argument |
+| ------ | ---------------------- | ------------------------------ | --------------------------------------------------- | ---------------------------- | --------------- |
+| NumPy  | 4 and 64               | 2.79                           | 2.28                                                | 4.17                         | 1.48            |
+| NumPy  | 16 and 1024            | 2.64                           | 3.73                                                | 1.99                         | 2.79            |
+| NumPy  | 64 and 64              | 1.69                           | 1.79                                                | 1.77                         | 1.64            |
+| JAX    | 4 and 64               | 3.66                           | 12.4                                                | 3.99                         | Not available   |
+| JAX    | 16 and 1024            | 31.7                           | 129                                                 | 14.2                         | Not available   |
+| JAX    | 64 and 64              | 12.7                           | 25.9                                                | 10.1                         | Not available   |
 
-Four conclusions follow from these numbers.
+The two benchmarks used other random layouts, so the times of the two tables differ for
+the same chunk counts. A chain of 29 additions with operands of 4 to 64 chunks and
+random layouts shows the effect on the number of chunks.
+
+| Strategy                                                                     | Time        | Chunks of the result |
+| ---------------------------------------------------------------------------- | ----------- | -------------------- |
+| Union of the boundaries                                                      | 136 ms      | 1028                 |
+| Polars rule                                                                  | 61 to 68 ms | 35 to 50             |
+| Fewest chunks, concatenation of all buffers                                  | 68 to 71 ms | 4 to 5               |
+| Fewest chunks, output argument                                               | 49 to 52 ms | 4 to 5               |
+| Fewest chunks, output argument or concatenation with `min_chunk_length=4096` | 45.5 ms     | 4                    |
+
+Six conclusions follow from these numbers.
 
 1. A split at the union of the boundaries copies nothing, but the number of chunks grows
    with each new layout. In the chain, this made it the slowest strategy.
 2. The target operand with the fewest chunks keeps the number of chunks low, and it is
    faster than the Polars rule in the chain.
-3. Deferred alignment is the fastest strategy for long pieces, and the slowest for short
-   pieces.
-4. The combination of deferred alignment and rechunk was the fastest in the chain.
+3. The output argument is the fastest way for long runs, and the slowest for short runs.
+4. The combination of the output argument and a concatenation was the fastest in the
+   chain.
+5. Without the output argument, no array API way is the fastest in all cases. A
+   concatenation of all buffers was the fastest or close to the fastest for JAX, where
+   each call costs about 50 us. The function per run makes the most calls and was the
+   slowest for JAX.
+6. For NumPy, the output argument was between 3 and 35 percent faster than the fastest
+   array API way, except for many short runs.
 
 The ranges in the chain table are from repeated runs of the same benchmark. The numbers
-are for a benchmark with plain lists of NumPy arrays, so a `ChunkedArray` class adds a
-cost per chunk to all strategies.
+are for a benchmark with plain lists of arrays, so an `IndexedArray` class adds a cost
+per chunk to all strategies.
 
 ### Chunk length limit
 
-The cost per chunk is the cost of one Python call to the chunk namespace, and it is
+The cost per chunk is the cost of one Python call to the buffer namespace, and it is
 different for each namespace. The following numbers are the extra time per chunk for an
 addition of an array with 1 000 000 values, compared to the same addition without
 chunks.
@@ -1350,10 +1402,10 @@ chunks.
 A limit on the number of chunks does not describe this cost, because 1000 chunks of 1
 000 000 values have a small cost per value, and 64 chunks of 100 values have a large
 cost per value. The limit is therefore a minimum mean chunk length, `min_chunk_length`.
-An operation that returns a `ChunkedArray` with a mean chunk length below
-`min_chunk_length` rechunks its result. `ChunkedArray` creation and `concat` also apply
-the limit. The same value selects deferred alignment or a rechunk in
-[Layout alignment](#layout-alignment).
+An operation that returns an `IndexedArray` with a mean chunk length below
+`min_chunk_length` merges its chunks into one chunk. For a pending operation, the merge
+only changes `layout`. Creation and `concat` also apply the limit. The same value
+selects the output argument or a concatenation in [Layout alignment](#layout-alignment).
 
 The default is different for each namespace, and the user can change it.
 
@@ -1365,39 +1417,38 @@ The default is different for each namespace, and the user can change it.
 
 A stream of 1000 batches of 1000 NumPy values, followed by 10 elementwise operations,
 took 21.2 ms without the limit. With a limit of 1024 or more values, the batches were
-rechunked one time, and the same operations took 12.1 ms. The same operations on one
-array without chunks took 11.6 ms. The defaults must be measured again with the
-`ChunkedArray` class, because the class adds a cost per chunk.
+merged one time, and the same operations took 12.1 ms. The same operations on one array
+without chunks took 11.6 ms. The defaults must be measured again with the `IndexedArray`
+class, because the class adds a cost per chunk.
 
 ### Interface
 
-1. `ChunkedArray(chunks, chunk_axis=0)` creates an array from a sequence of arrays.
-2. `rechunk()` returns one array of the chunk namespace.
-3. `__array__` and `__dlpack__` rechunk, because the receiver expects contiguous data.
-4. `ChunkedArray.from_polars(series)` creates one chunk for each chunk of a Polars
+1. `IndexedArray(buffers, chunk_axis=0)` creates an array from a sequence of arrays,
+   with one chunk per buffer.
+2. `compute()` returns one array of the buffer namespace, with all pending maps applied.
+3. `__array__` and `__dlpack__` call `compute`, because the receiver expects contiguous
+   data.
+4. `IndexedArray.from_polars(series)` creates one buffer for each chunk of a Polars
    series. `to_numpy` on one chunk of `get_chunks` returned a view for a numeric chunk
    without nulls. For 4 chunks, this took 0.01 ms against 0.74 ms for `to_numpy` on the
    full series. PyArrow has `ChunkedArray.chunks` for the same purpose.
 
-Unlike Polars, the `ChunkedArray` rechunks automatically when its chunks are short. See
-[Chunk length limit](#chunk-length-limit).
-
 ### Location
 
-`ChunkedArray` is in a subpackage `polder.chunked` that does not import other polder
+`IndexedArray` is in a subpackage `polder.indexed` that does not import other polder
 modules. It can move to a separate package later without a change in polder. polder
-itself has no code that checks for a `ChunkedArray`.
+itself has no code that checks for an `IndexedArray`.
 
-A `ChunkedArray` with JAX chunks is registered as a pytree, with the chunks as children
-and `chunk_axis` as metadata. The number of chunks is part of the tree structure, so
-`jax.jit` compiles the function again when the number of chunks changes. The benefit of
-chunks under `jax.jit` was not measured. NumPy is the main use case.
+An `IndexedArray` with JAX buffers is registered as a pytree, with the buffers as
+children, and the maps, the layout and `chunk_axis` as metadata. The maps are NumPy
+arrays, so they are combined during tracing. The number of buffers is part of the tree
+structure, so `jax.jit` compiles the function again when the number of buffers changes.
 
 ### Dask arrays
 
 Dask is a library for chunked arrays, and the eager implementation already accepts Dask
 arrays. Creation, `sin` and a binary operation returned Dask arrays, and
-`da.concatenate` kept the chunks. Dask is not a replacement for `ChunkedArray`, for two
+`da.concatenate` kept the chunks. Dask is not a replacement for `IndexedArray`, for two
 reasons.
 
 1. Dask builds a task graph and runs it on `compute`. An addition of two arrays with 1
@@ -1408,20 +1459,22 @@ reasons.
    fails.
 
 Dask support is part of G2, so Dask arrays are added to the eager tests in stage 12.
-Whether Dask support is sufficient without `ChunkedArray` is
+Whether Dask support is sufficient without `IndexedArray` is
 [open question 8](#open-questions).
 
-### Stage 12: chunked arrays
+### Stage 12: indexed arrays
 
-1. Add `polder.chunked.ChunkedArray` with its namespace and the fallback rule. This
+1. Add `polder.indexed.IndexedArray` with its namespace and the fallback rule. This
    stage needs the corrections of D5 and D7 from stage 1.
 2. Run the `array-api-tests` suite against the namespace.
-3. Add the layout alignment and the chunk length limit, and measure the defaults of
+3. Add the pending operations and the combination of maps.
+4. Add the layout alignment and the chunk length limit, and measure the defaults of
    `min_chunk_length` with the class.
-4. Add the chunk rules in the order of the table in [Chunk rules](#chunk-rules). The
-   rules without a copy come first, because they are the reason for the type.
-5. Add `ChunkedArray` and Dask to the `value_array_type` fixture for the eager tests.
-6. Add `from_polars` and the creation from a PyArrow chunked array.
+5. Add the rules per function in the order of the table in
+   [Rules per function](#rules-per-function). The rules without a copy come first,
+   because they are the reason for the type.
+6. Add `IndexedArray` and Dask to the `value_array_type` fixture for the eager tests.
+7. Add `from_polars` and the creation from a PyArrow chunked array.
 
 ## Stage order
 
@@ -1435,9 +1488,9 @@ The order of the stages follows from three rules.
    functions that change the shape and need new arguments come later, so that the open
    questions about their labels do not block the other work.
 
-Stage 12 adds a value array type that is not a goal in the README, so it comes last. Its
-fallback rule makes it complete from the start, so it can start after stage 1 when the
-need is larger.
+Stage 12 adds the value array type for G6. It comes last, because it is not necessary
+for the other goals. Its fallback rule makes it complete from the start, so it can start
+after stage 1 when the need is larger.
 
 Stage 8 does not depend on stages 2 to 7. It can start when stage 1 is complete, if the
 lazy defects have a higher priority than the new eager functions.
@@ -1467,5 +1520,9 @@ lazy defects have a higher priority than the new eager functions.
 7. Should integer overflow in the lazy implementation stay a documented difference
    between backends?
 
-8. Is `ChunkedArray` necessary, or is Dask support in the eager implementation
-   sufficient?
+8. Are chunks in `IndexedArray` necessary, or is Dask support in the eager
+   implementation sufficient for chunked values?
+
+9. Is a protocol implementation with lazy label frames useful in addition to
+   `IndexedArray`? This depends on a measurement of chained label operations, such as a
+   filter followed by an alignment.
