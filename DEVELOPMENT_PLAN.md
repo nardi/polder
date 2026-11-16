@@ -17,7 +17,9 @@ The plan has six parts.
 4. [Lazy implementation difficulties](#lazy-implementation-difficulties) lists the
    operations that are hard to implement lazily, each with a suggested solution.
 5. [Indexed arrays](#indexed-arrays) describes a value array type with pending indices
-   and chunks, which meets G6 without a third implementation of the protocol.
+   and chunks. [Deferred implementation](#deferred-implementation) describes the third
+   implementation from G6, which gives a chain of label operations to the DataFrame
+   backend as one query.
 6. [Open questions](#open-questions) lists the choices that need a decision from the
    maintainer.
 
@@ -88,6 +90,10 @@ Defects in the eager implementation:
   alignment error separately.
 - **D10.** `align` is not exported from the `polder` package, while the README lists it
   as a generic operation.
+- **D17.** `_align_labels` reads the result of a left join in row order. Polars only
+  guarantees the row order of a join with its `maintain_order` argument, and Narwhals
+  has no such argument. A left join of 2 000 000 shuffled rows kept the left order with
+  the in-memory engine, and returned another order with the streaming engine.
 
 Defects in the lazy implementation:
 
@@ -486,7 +492,10 @@ only defines a boolean mask as the single index, so the conversion is necessary 
 mask on one axis. This corrects D2.
 
 **Alignment.** `align` gets the three cost levels from
-[Label identity](#label-identity). This corrects D7 and D8.
+[Label identity](#label-identity). This corrects D7 and D8. The join of level 3 adds a
+row index to both frames, and the permutation is placed with a scatter,
+`positions[left_index] = right_index`, so the result does not depend on the row order of
+the join. This corrects D17.
 
 ```python
 def labels_are_equal(left, right) -> bool:
@@ -1027,9 +1036,9 @@ in batches, and an array of all batches needs a `concat`.
 Both sources of copies have the same solution. An array keeps its existing buffers and a
 pending index into them, and it applies the index only when an operation needs the
 values. This plan therefore proposes one value array type for both, `IndexedArray`. It
-follows the array API, so the eager implementation holds it as its value array. A third
-implementation of the protocol is not necessary for G6. See
-[Design decision](#design-decision).
+follows the array API, so the eager implementation holds it as its value array. See
+[Design decision](#design-decision). The pending label operations of G6 are in the
+[Deferred implementation](#deferred-implementation).
 
 ### Measurements of copies
 
@@ -1096,8 +1105,7 @@ user explicit control with `rechunk`. It has no limit on the number of chunks.
 The pending index is in an array type that follows the array API, and not in an
 implementation of the protocol. Two alternatives are rejected.
 
-1. A third implementation of the protocol, with lazy label frames and one position map
-   per axis. This is the form that the README describes for G6.
+1. Position maps for the values in an implementation of the protocol.
 2. A chunked implementation of the protocol, `ChunkedFrameLabeledArray`, which holds a
    tuple of eager arrays.
 
@@ -1112,19 +1120,15 @@ The reasons are:
    less.
 3. The label rules do not depend on chunks or on pending indices. Alignment compares the
    full label frames, and Polars already keeps the label frames in chunks.
-4. The position maps of the rejected third implementation are pending integer indices,
-   and chunks are pending ranges over several buffers. One type with both kinds of index
-   can combine an alignment, a slice and a `concat` without a copy in between.
+4. Position maps are pending integer indices, and chunks are pending ranges over several
+   buffers. One type with both kinds of index can combine an alignment, a slice and a
+   `concat` without a copy in between.
 5. An `IndexedArray` is useful outside polder, and the `array-api-tests` suite can test
    it, because it is a complete array API namespace.
 
-The rejected third implementation has one property that an array type cannot have, which
-is a pending operation on the label frames, for example with Narwhals lazy frames. A
-label frame has one row per entry of its axis, while the values have one entry per
-combination of all axes. The copies of label frames are therefore small, and the
-alignment join is not avoided by postponement. Whether lazy label frames are useful
-depends on a measurement of chained label operations, which is
-[open question 9](#open-questions).
+An array type cannot postpone operations on the label frames. These are in the
+[Deferred implementation](#deferred-implementation), which uses an `IndexedArray` for
+its values when the user gives one.
 
 A prototype of about 100 lines confirmed that the current eager implementation works
 with a chunked array type. The prototype chunked along axis 0, implemented the
@@ -1476,6 +1480,134 @@ Whether Dask support is sufficient without `IndexedArray` is
 6. Add `IndexedArray` and Dask to the `value_array_type` fixture for the eager tests.
 7. Add `from_polars` and the creation from a PyArrow chunked array.
 
+## Deferred implementation
+
+### Purpose
+
+The label operations are the largest cost of the eager implementation. A Polars join of
+1 000 000 rows took 39 ms with integer labels and 79 ms with string labels, against 1 ms
+for the addition of the values. See [Measurements](#measurements). A query engine can
+reduce this cost when it sees a chain of label operations as one query. It can then move
+a filter in front of a join, so that the join has fewer rows. The deferred
+implementation gives the DataFrame backend this chain. This is the third implementation
+that G6 describes.
+
+### Measurement of a chain
+
+The benchmark has four arrays with 1 000 000 entries each. The label frames have an
+integer column and a string column with 100 groups, in a different random order for each
+array. The user code is:
+
+```python
+result = a + b
+result = result[nw.col("group").is_in(selected)]
+result = result + c[nw.col("group").is_in(selected)]
+result = result[nw.col("id") % 2 == 0]
+result = result * d[nw.col("group").is_in(selected) & (nw.col("id") % 2 == 0)]
+values = result.values()
+```
+
+The filters select 10 percent and then 50 percent of the rows, so the result has 50 000
+entries. Each operand gets the same filters, because an alignment needs the same rows in
+both arrays. All variants returned the same labels and values.
+
+| Variant                                                                  | Time          |
+| ------------------------------------------------------------------------ | ------------- |
+| The current eager implementation                                         | 222 ms        |
+| Eager label frames in the order of the user code                         | 190 to 208 ms |
+| Eager label frames, with all filters moved to the start by hand          | 111 ms        |
+| Lazy label frames, with the values computed at each operation            | 201 ms        |
+| Lazy label frames, with the values computed at the end                   | 42 to 50 ms   |
+| Lazy label frames, with the values computed at the end, streaming engine | 58 ms         |
+
+The optimized Polars plan for the lazy label frames applied both filters to all four
+inputs before the first join, so each join had 50 000 rows on each side.
+
+Three conclusions follow from these numbers.
+
+1. Lazy label frames made this chain 4 to 5 times faster.
+2. The gain needs a deferred computation of the values. An operation that computes
+   values must collect the positions of its operands, and this ends the query before the
+   later filters are known. With values computed at each operation, the lazy label
+   frames gave no gain.
+3. The filters at the start gave about half of the gain. The remaining part comes from
+   one query instead of a query per step, and it was not split further.
+
+### Structure
+
+A `DeferredFrameLabeledArray` is a graph of array operations. The leaves are value
+arrays, and the label frames are Narwhals lazy frames.
+
+| Field            | Content                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `_leaves`        | The value arrays of the graph, which are plain arrays or `IndexedArray` objects                                                  |
+| `_node`          | The operation of the graph, such as an addition of two inputs, or a leaf                                                         |
+| `_axis_frames`   | One lazy frame per axis. It contains the label columns, an `__order` column, and one position column for each leaf on that axis. |
+| `_closed_frames` | The lazy frames of axes that an operation in the graph removes, such as the reduced axis of a reduction                          |
+
+A position column states, for each row of the axis, the position of that row in the axis
+of the leaf. The `__order` column states the order of the rows, because a lazy frame has
+no row order. See D17.
+
+The operations change the graph and the frames as follows.
+
+1. An elementwise function aligns the axis frames of its inputs with a lazy join on the
+   label columns, and keeps the position columns of all leaves. It adds a node for the
+   function. Nothing is collected.
+2. An index with an expression, a mapping or a slice is a lazy filter on the axis frame.
+   A slice filters on a row index with `order_by="__order"`. All position columns of the
+   axis are filtered together.
+3. A reduction adds a node, and moves the frame of the reduced axis to `_closed_frames`.
+   The positions of the reduced axis are still necessary for the gather of the leaves.
+4. A function whose labels depend on the values computes the graph first. Examples are
+   an index with a boolean mask that is computed from values, `sort`, `nonzero_labels`
+   and `unique_values`.
+
+`values()`, `labels()`, `equals` and the scalar conversions compute the array. The
+computation has three steps.
+
+1. All axis frames and closed frames of the graph are collected together. Narwhals has
+   no `collect_all`, so this uses the native function of the backend where it exists,
+   such as `pl.collect_all`, and one `collect` per frame otherwise.
+2. Each leaf is gathered one time, with the position columns of all its axes. With an
+   `IndexedArray` leaf, the gather is a pending map, which combines with other pending
+   maps.
+3. The nodes of the graph are evaluated in order with the functions of the array
+   namespace.
+
+The result is stored, so a second call does not compute again. `shape()` only collects
+the row counts of the axis frames, and it does not evaluate the graph.
+
+Under `jax.jit`, the label frames are static metadata, as in the eager implementation.
+The queries are therefore collected during tracing, and the gathers and the graph are
+traced as JAX operations.
+
+### Relation to the other implementations
+
+The lazy implementation already has lazy alignment and lazy index operations on frames
+with index columns, so the deferred implementation reuses `polder/lazy/align.py` and the
+index plans of stage 9. The difference is the values. The lazy implementation stores the
+values in a frame, and each binary operation joins the value frames, which made a chain
+of 8 additions on a 300 by 300 array take 603 ms against 69 ms for the eager
+implementation. The deferred implementation computes the values with the array
+namespace, so it has no value joins.
+
+The eager implementation stays the reference for the label rules, and it is the
+implementation for code that needs each result at once, such as a loop that inspects the
+values after each step.
+
+### Stage 13: deferred implementation
+
+1. Add `DeferredFrameLabeledArray` with the graph, the axis frames and the computation.
+   This stage needs the lazy index operations from stage 9.
+2. Add the elementwise functions and the index operations, which do not collect.
+3. Add the reductions with closed frames, then the other functions in the order of
+   stages 4 to 7.
+4. Run the shared tests in `tests/operations`, with the eager implementation as the
+   reference.
+5. Add the chain from [Measurement of a chain](#measurement-of-a-chain) as a benchmark,
+   to detect a change that collects too early.
+
 ## Stage order
 
 The order of the stages follows from three rules.
@@ -1491,6 +1623,10 @@ The order of the stages follows from three rules.
 Stage 12 adds the value array type for G6. It comes last, because it is not necessary
 for the other goals. Its fallback rule makes it complete from the start, so it can start
 after stage 1 when the need is larger.
+
+Stage 13 adds the deferred implementation for G6. It needs the lazy index operations
+from stage 9 and the label rules from stages 2 to 7, so it comes after them. It does not
+need stage 12.
 
 Stage 8 does not depend on stages 2 to 7. It can start when stage 1 is complete, if the
 lazy defects have a higher priority than the new eager functions.
@@ -1522,7 +1658,3 @@ lazy defects have a higher priority than the new eager functions.
 
 8. Are chunks in `IndexedArray` necessary, or is Dask support in the eager
    implementation sufficient for chunked values?
-
-9. Is a protocol implementation with lazy label frames useful in addition to
-   `IndexedArray`? This depends on a measurement of chained label operations, such as a
-   filter followed by an alignment.
